@@ -7,6 +7,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-black?logo=apple)](#requirements)
 [![Swift](https://img.shields.io/badge/swift-5.9-orange?logo=swift)](#requirements)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)](#requirements)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 ![Status](https://img.shields.io/badge/status-personal%20project-blue)
 
 </div>
@@ -17,7 +18,7 @@ network throughput, temperatures, and power input directly from the system — n
 no telemetry, no background services beyond an optional privileged fan helper.
 
 ```text
-  1%   12%   13%   62%  2400  ↓1.2M  ↑240K
+  1%   12%   13%   62%  2400  ↓1.2M ↑240K
  limit  cpu   gpu   ram   fan   net
 ```
 
@@ -64,9 +65,11 @@ Click the status item for details. Right-click it for actions.
 | RAM | Memory used, as a percentage |
 | Fan | Current fan speed in RPM (number only) |
 | Network | Download and upload rate |
+| Power | Optional system power input in watts |
 
 Every field is padded to a fixed width and rendered with a monospaced font, so the status
-item does not shift while values change. Fields can be enabled or disabled individually.
+item does not shift while values change. Fields can be enabled or disabled individually
+from the right-click menu; the power input metric is off by default.
 
 ### Popover
 
@@ -277,9 +280,11 @@ style, and run the self-check before submitting:
 ```sh
 swift build -c release
 ./.build/release/Setatus --selfcheck
+bash scripts/build-app.sh
 ```
 
 ## License
 
-This project does not include a license file yet. Add one (for example MIT or Apache-2.0)
-before redistributing the code.
+MIT — see [LICENSE](LICENSE).
+
+Copyright (c) 2026 bae.
