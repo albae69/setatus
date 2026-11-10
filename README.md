@@ -79,6 +79,7 @@ from the right-click menu; the power input metric is off by default.
 - **CPU / GPU / RAM** — live usage, temperature readings, and meter bars.
 - **Power** — system power input (`SystemPowerIn`), negotiated adapter wattage, battery
   percentage, and charging state.
+- **Uptime** — wall-clock time since boot, including time spent asleep.
 - **Fan** — live RPM, min/max/target values, a manual-control slider clamped to the SMC
   range, and an Auto button.
 - **Internet** — download/upload speed, cumulative totals since boot, and the local IPv4
@@ -95,7 +96,7 @@ Right-click (or Control-click) the status item:
 | Refresh | Reload usage and processes |
 | Fan Auto | Return fan control to the system |
 | Menu Bar | Toggle individual menu bar metrics |
-| Launch at Login | Register or unregister with `SMAppService` |
+| Launch at Login | Install or remove a `~/Library/LaunchAgents` login item |
 | About Setatus | App name, icon, version, and author |
 | Quit Setatus | Restore the fan and exit |
 
@@ -143,7 +144,7 @@ warn on first launch — open it from Finder with **Open** if that happens.
 | Setting | Where |
 | --- | --- |
 | Menu bar metrics | Right-click → **Menu Bar** (stored in `UserDefaults` under `menuMetrics`) |
-| Launch at login | Right-click → **Launch at Login** |
+| Launch at login | Right-click → **Launch at Login** (`~/Library/LaunchAgents/dev.bae.setatus.plist`) |
 | OpenCode API key | Automatically read from 9router, or enter one in the popover |
 
 Setatus reads the OpenCode key from `~/.9router/db/data.sqlite`
@@ -162,6 +163,7 @@ in `UserDefaults`.
 | Local IP address | `getifaddrs`, preferring `en0` |
 | Power input | `AppleSmartBattery` → `PowerTelemetryData.SystemPowerIn` (mW) |
 | Battery state | `IOPSCopyPowerSourcesInfo` |
+| Uptime | `sysctl` `KERN_BOOTTIME` |
 | OpenCode usage | `GET https://opencode.ai/zen/go/v1/usage` |
 | Today's usage | 9router `usageDaily` table |
 
@@ -187,7 +189,8 @@ every 2 seconds. The helper:
 - restores automatic mode and exits when the request is older than 30 seconds or
   `rpm = 0`,
 - rejects symlinked request files, files outside `~/.config/setatus`, and fan indices
-  without a matching SMC key.
+  without a matching SMC key,
+- appends start, engage, target, and exit reasons to `~/.config/setatus/helper.log`.
 
 Quitting Setatus writes `rpm = 0`, so the fan returns to automatic control immediately.
 
@@ -230,7 +233,7 @@ Sources/Setatus/
   Power.swift         power input, adapter, battery
   Processes.swift     process list and SIGTERM
   Usage.swift         OpenCode limits and today's stats
-  LaunchAtLogin.swift SMAppService registration
+  LaunchAtLogin.swift LaunchAgent login item
   Fmt.swift           adaptive, fixed-width number formatting
   Shell.swift         process runner helper
   SelfCheck.swift     command line checks
@@ -262,6 +265,16 @@ pgrep -f -- --fan-hold
 **Usage shows "No opencode-go key found".**
 Make sure 9router has an `opencode-go` connection in
 `~/.9router/db/data.sqlite`, or enter the key manually in the popover.
+
+**The password prompt appears on every slider move.**
+That means the root helper exited. Check the reason it logged:
+
+```sh
+cat ~/.config/setatus/helper.log
+```
+
+A stale request, an invalid fan index, or a request file outside `~/.config/setatus`
+makes the helper restore automatic mode and exit on purpose.
 
 ## Limitations
 

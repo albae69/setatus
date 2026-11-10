@@ -56,16 +56,21 @@ enum Network {
 
     static func totals() -> (in: UInt64, out: UInt64) {
         var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
-        var length = 0
-        guard sysctl(&mib, u_int(mib.count), nil, &length, nil, 0) == 0, length > 0 else {
-            return (0, 0)
+        // The table can grow between the size probe and the fill; retry instead of
+        // reporting a bogus zero rate for the tick.
+        for _ in 0..<3 {
+            var length = 0
+            guard sysctl(&mib, u_int(mib.count), nil, &length, nil, 0) == 0, length > 0 else {
+                return (0, 0)
+            }
+            var buffer = [UInt8](repeating: 0, count: length)
+            guard sysctl(&mib, u_int(mib.count), &buffer, &length, nil, 0) == 0 else { continue }
+            return sum(buffer, length)
         }
+        return (0, 0)
+    }
 
-        var buffer = [UInt8](repeating: 0, count: length)
-        guard sysctl(&mib, u_int(mib.count), &buffer, &length, nil, 0) == 0 else {
-            return (0, 0)
-        }
-
+    private static func sum(_ buffer: [UInt8], _ length: Int) -> (in: UInt64, out: UInt64) {
         var bytesIn: UInt64 = 0
         var bytesOut: UInt64 = 0
 

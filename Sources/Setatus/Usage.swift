@@ -20,6 +20,8 @@ struct TodayStats {
 }
 
 enum UsageService {
+    enum UsageError: Error { case unauthorized }
+
     static let usageURL = URL(string: "https://opencode.ai/zen/go/v1/usage")!
     // ponytail: plaintext in 9router's own DB already; move to Keychain if app is shared.
     static let keyOverrideDefaultsKey = "apiKeyOverride"
@@ -46,9 +48,9 @@ enum UsageService {
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 10
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        if http.statusCode == 401 || http.statusCode == 403 { throw UsageError.unauthorized }
+        guard (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
         return try parseUsage(data)
     }
 

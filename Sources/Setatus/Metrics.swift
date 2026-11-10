@@ -49,4 +49,14 @@ enum Metrics {
         let used = (UInt64(stats.active_count) + UInt64(stats.wire_count) + UInt64(stats.compressor_page_count)) * ps
         return (used, ProcessInfo.processInfo.physicalMemory)
     }
+
+    /// Wall-clock time since boot, including time spent asleep.
+    static func uptime() -> TimeInterval {
+        var boottime = timeval()
+        var size = MemoryLayout<timeval>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_BOOTTIME]
+        guard sysctl(&mib, u_int(mib.count), &boottime, &size, nil, 0) == 0 else { return 0 }
+        let booted = TimeInterval(boottime.tv_sec) + TimeInterval(boottime.tv_usec) / 1_000_000
+        return max(0, Date().timeIntervalSince1970 - booted)
+    }
 }

@@ -35,4 +35,15 @@ enum Fmt {
     static func wattsCompact(_ value: Double) -> String {
         value >= 10 ? String(format: "%.0fW", value) : String(format: "%.1fW", value)
     }
+
+    /// Compact uptime: 3d 4h 12m, 4h 12m, 12m.
+    static func duration(_ seconds: TimeInterval) -> String {
+        let total = Int(max(0, seconds))
+        let days = total / 86_400
+        let hours = (total % 86_400) / 3_600
+        let minutes = (total % 3_600) / 60
+        if days > 0 { return "\(days)d \(hours)h \(minutes)m" }
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        return "\(minutes)m"
+    }
 }

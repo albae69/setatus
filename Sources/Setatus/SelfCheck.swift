@@ -2,6 +2,26 @@ import Foundation
 
 enum SelfCheck {
     static func run() -> Never {
+        if CommandLine.arguments.contains("--logintest") {
+            print("logintest: install=\(LaunchAtLogin.set(true)) enabled=\(LaunchAtLogin.isEnabled)")
+            print("logintest: plist=\(FileManager.default.homeDirectoryForCurrentUser.path)/Library/LaunchAgents/dev.bae.setatus.plist")
+            print("logintest: uninstall=\(LaunchAtLogin.set(false)) enabled=\(LaunchAtLogin.isEnabled)")
+            exit(0)
+        }
+
+        if CommandLine.arguments.contains("--shelltest") {
+            // 200 KB output: a pipe-buffer deadlock here would hang forever.
+            let data = Shell.run("/bin/sh", ["-c", "head -c 200000 /dev/zero | tr '\\0' x"])
+            print("shelltest: big output", data?.count == 200_000 ? "ok" : "failed (\(data?.count ?? -1) bytes)")
+
+            // A child that never exits must be dropped, not waited on.
+            let started = Date()
+            let hung = Shell.run("/bin/sh", ["-c", "sleep 30"], timeout: 0.3)
+            let took = Date().timeIntervalSince(started)
+            print("shelltest: timeout", hung == nil && took < 5 ? "ok (\(String(format: "%.2f", took))s)" : "failed")
+            exit(0)
+        }
+
         if CommandLine.arguments.contains("--killtest") {
             let child = Process()
             child.executableURL = URL(fileURLWithPath: "/bin/sleep")
@@ -9,9 +29,25 @@ enum SelfCheck {
             try? child.run()
             let pid = child.processIdentifier
             Thread.sleep(forTimeInterval: 0.2)
-            let sent = Processes.kill(pid)
+            let row = ProcessRow(pid: pid, name: "sleep", cpu: 0, memoryMB: 0,
+                                 elapsed: Processes.elapsed(pid) ?? 0, listedAt: Date())
+            let sent = Processes.kill(row)
             child.waitUntilExit()
             print("killtest:", sent && child.terminationReason == .uncaughtSignal ? "ok" : "failed")
+
+            // A row listed a minute ago cannot match a process that just started:
+            // refusing here is what keeps a recycled PID from being signalled.
+            let other = Process()
+            other.executableURL = URL(fileURLWithPath: "/bin/sleep")
+            other.arguments = ["60"]
+            try? other.run()
+            Thread.sleep(forTimeInterval: 0.2)
+            let stale = ProcessRow(pid: other.processIdentifier, name: "sleep", cpu: 0, memoryMB: 0,
+                                   elapsed: 0, listedAt: Date().addingTimeInterval(-60))
+            let refused = !Processes.kill(stale)
+            kill(other.processIdentifier, SIGKILL)
+            other.waitUntilExit()
+            print("killtest: reused pid", refused ? "ok" : "failed")
         }
 
         print("cpu:", String(format: "%.1f%%", Metrics.cpuPercent()))
@@ -35,6 +71,7 @@ enum SelfCheck {
 
         let memory = Metrics.ram()
         print("ram:", memory.used / 1_048_576, "MB /", memory.total / 1_048_576, "MB")
+        print("uptime:", Fmt.duration(Metrics.uptime()), "(\(Int(Metrics.uptime()))s)")
 
         if let smc = SMC() {
             let temps = smc.temperatures()

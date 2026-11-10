@@ -23,7 +23,9 @@ struct PanelView: View {
         }
         .padding(14)
         .frame(width: 320)
-        .onAppear { keyText = UsageService.apiKey() ?? "" }
+        .onAppear {
+            Task { keyText = await Task.detached { UsageService.apiKey() }.value ?? "" }
+        }
     }
 
     private var header: some View {
@@ -37,6 +39,7 @@ struct PanelView: View {
             }
             .buttonStyle(.borderless)
             .help("Refresh usage")
+            .accessibilityLabel("Refresh usage")
         }
     }
 
@@ -50,6 +53,7 @@ struct PanelView: View {
                 value: String(format: "%.0f%%", model.ramPercent),
                 ratio: model.ramPercent / 100)
             row(title: "Power", value: powerText, ratio: 0, showsBar: false)
+            row(title: "Uptime", value: Fmt.duration(model.uptime), ratio: 0, showsBar: false)
             if let extras = extraTemps {
                 Text(extras).font(.caption2).foregroundStyle(.secondary)
             }
@@ -82,8 +86,8 @@ struct PanelView: View {
     private var netSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Internet").font(.caption).foregroundStyle(.secondary)
-            flowRow(arrow: "↓", label: "Download", value: "\(rate(model.netDown))/s")
-            flowRow(arrow: "↑", label: "Upload", value: "\(rate(model.netUp))/s")
+            flowRow(arrow: "↓", label: "Download", value: "\(Fmt.rate(model.netDown))/s")
+            flowRow(arrow: "↑", label: "Upload", value: "\(Fmt.rate(model.netUp))/s")
             HStack {
                 Text("Total ↓ \(bytes(model.netTotalIn))   ↑ \(bytes(model.netTotalOut))")
                     .font(.caption2)
@@ -111,17 +115,6 @@ struct PanelView: View {
         .font(.caption)
     }
 
-    private func rate(_ value: Double) -> String {
-        let units = ["B", "KB", "MB", "GB"]
-        var scaled = max(0, value)
-        var unit = 0
-        while scaled >= 1024, unit < units.count - 1 {
-            scaled /= 1024
-            unit += 1
-        }
-        return String(format: scaled >= 100 || unit == 0 ? "%.0f %@" : "%.1f %@", scaled, units[unit])
-    }
-
     @ViewBuilder
     private var limitsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -134,6 +127,9 @@ struct PanelView: View {
                 Text(error).font(.caption).foregroundStyle(.secondary)
             } else {
                 Text("Loading…").font(.caption).foregroundStyle(.secondary)
+            }
+            if let error = model.usageError, model.usage != nil {
+                Text(error).font(.caption2).foregroundStyle(.orange)
             }
             if let today = model.today {
                 Text("Today  \(today.requests) req · \(compact(today.promptTokens + today.completionTokens)) tok · $\(String(format: "%.3f", today.cost))")
@@ -159,13 +155,14 @@ struct PanelView: View {
                                       set: { model.fanTarget = $0 }),
                        in: fan.minimum...max(fan.minimum + 1, fan.maximum),
                        step: 50) { editing in
-                    if !editing { model.applyFan(Int(model.fanTarget)) }
+                    model.fanEditing = editing
+                    if !editing { Task { await model.applyFan(Int(model.fanTarget)) } }
                 }
                 HStack {
                     Text("min \(Int(fan.minimum.rounded())) · max \(Int(fan.maximum.rounded())) · target \(Int(fan.target.rounded()))")
                         .font(.caption2).foregroundStyle(.secondary)
                     Spacer()
-                    Button("Auto") { model.applyFan(0) }
+                    Button("Auto") { Task { await model.applyFan(0) } }
                         .buttonStyle(.borderless)
                         .font(.caption2)
                 }
@@ -191,6 +188,7 @@ struct PanelView: View {
                 .buttonStyle(.borderless)
                 .font(.caption2)
                 .help("Refresh processes")
+                .accessibilityLabel("Refresh processes")
             }
 
             ForEach(model.processes) { row in
@@ -212,7 +210,7 @@ struct PanelView: View {
                             .foregroundStyle(.secondary)
                         Button("Kill") {
                             confirmPID = nil
-                            model.kill(row)
+                            Task { await model.kill(row) }
                         }
                         .buttonStyle(.borderless)
                         .foregroundStyle(.red)
@@ -226,6 +224,7 @@ struct PanelView: View {
                         }
                         .buttonStyle(.borderless)
                         .help("Kill \(row.name)")
+                        .accessibilityLabel("Kill \(row.name)")
                     }
                 }
             }

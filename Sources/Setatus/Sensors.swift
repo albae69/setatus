@@ -135,8 +135,10 @@ final class SMC {
     }
 
     private func scan() {
-        scanned = true
+        // Only mark the scan done once the key count is readable; a Mac where AppleSMC
+        // is not ready yet must retry on the next tick instead of going permanently blank.
         guard let count = readUInt32("#KEY"), count > 0 else { return }
+        scanned = true
 
         var seen = Set<String>()
         for index in 0..<min(count, 2000) {
