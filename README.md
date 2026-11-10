@@ -8,7 +8,8 @@
 [![Swift](https://img.shields.io/badge/swift-5.9-orange?logo=swift)](#requirements)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)](#requirements)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-![Status](https://img.shields.io/badge/status-personal%20project-blue)
+[![Status](https://img.shields.io/badge/status-personal%20project-blue)](https://github.com/albae69/setatus)
+[![GitHub stars](https://img.shields.io/github/stars/albae69/setatus?style=social)](https://github.com/albae69/setatus)
 
 </div>
 
@@ -31,7 +32,7 @@ Click the status item for details. Right-click it for actions.
 </div>
 
 <div align="center">
-  <sub>Made by bae</sub>
+  <sub>Made by <a href="https://github.com/albae69">albae69</a></sub>
 </div>
 
 ---
@@ -111,7 +112,7 @@ Apple M4 MacBook Pro (`Mac16,1`); other models may behave differently.
 ## Build from source
 
 ```sh
-git clone <your-repo-url> setatus
+git clone https://github.com/albae69/setatus.git
 cd setatus
 
 bash scripts/build-app.sh
