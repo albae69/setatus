@@ -22,6 +22,40 @@ enum SelfCheck {
             exit(0)
         }
 
+        if CommandLine.arguments.contains("--menutest") {
+            MainActor.assumeIsolated {
+                let defaults = UserDefaults.standard
+                let saved = defaults.dictionary(forKey: "menuDetails")
+                let model = Model()
+                model.temps = [("CPU", 61.4), ("GPU", 47.6)]
+
+                model.setDetail(.temperature, for: .cpu)
+                let cpuTemp = model.menuTitle.contains("61°")
+                let tagged = model.menuTitle.contains("OC ") && model.menuTitle.contains("CPU ")
+                    && model.menuTitle.contains("GPU ")
+                print("menutest: title", model.menuTitle)
+                let reloaded = Model().detail(.cpu)
+                model.setDetail(.percent, for: .cpu)
+                let cpuPercent = !model.menuTitle.contains("°")
+
+                model.setDetail(.temperature, for: .gpu)
+                let gpuTemp = model.menuTitle.contains("48°")
+                model.setDetail(.percent, for: .gpu)
+
+                // No sensor for the group: stay on percent instead of printing a blank degree.
+                model.temps = []
+                model.setDetail(.temperature, for: .cpu)
+                let fallback = !model.menuTitle.contains("°") && cpuPercent
+
+                if let saved { defaults.set(saved, forKey: "menuDetails") }
+                else { defaults.removeObject(forKey: "menuDetails") }
+
+                let ok = cpuTemp && cpuPercent && gpuTemp && fallback && tagged && reloaded == .temperature
+                print("menutest:", ok ? "ok" : "failed cpu=\(cpuTemp) pct=\(cpuPercent) gpu=\(gpuTemp) fallback=\(fallback) tags=\(tagged) persisted=\(reloaded)")
+            }
+            exit(0)
+        }
+
         if CommandLine.arguments.contains("--killtest") {
             let child = Process()
             child.executableURL = URL(fileURLWithPath: "/bin/sleep")

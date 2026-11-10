@@ -1,10 +1,37 @@
 import Foundation
 import SwiftUI
 
+enum MetricDetail: String, CaseIterable, Identifiable {
+    case percent, temperature
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .percent: return "Percent"
+        case .temperature: return "Temperature"
+        }
+    }
+}
+
 enum MenuMetric: String, CaseIterable, Identifiable {
     case limit, cpu, gpu, ram, fan, net, power
 
     var id: String { rawValue }
+
+    /// Metrics that can show a sensor reading instead of a percentage.
+    var hasDetail: Bool { self == .cpu || self == .gpu }
+
+    /// Short menu bar prefix; empty where the value speaks for itself (rpm, arrows, W).
+    var tag: String {
+        switch self {
+        case .limit: return "OC"
+        case .cpu: return "CPU"
+        case .gpu: return "GPU"
+        case .ram: return "RAM"
+        case .fan, .net, .power: return ""
+        }
+    }
 
     var title: String {
         switch self {
@@ -42,12 +69,15 @@ final class Model: ObservableObject {
     @Published var gpuUsage: Double?
     @Published var power: PowerSnapshot?
     @Published private(set) var metrics: Set<MenuMetric> = Set(MenuMetric.defaults)
+    @Published private(set) var details: [MenuMetric: MetricDetail] = [:]
     @Published var processes: [ProcessRow] = []
     @Published var killError: String?
     @Published var usage: Usage?
     @Published var today: TodayStats?
     @Published var usageError: String?
     @Published var updatedAt: Date?
+
+    private static let detailKey = "menuDetails"
 
     private var metricsTimer: Timer?
     private var tickPending = false
@@ -63,6 +93,13 @@ final class Model: ObservableObject {
         let stored = UserDefaults.standard.stringArray(forKey: MenuMetric.storageKey)
         let parsed = Set((stored ?? MenuMetric.defaults.map(\.rawValue)).compactMap(MenuMetric.init(rawValue:)))
         metrics = parsed.isEmpty ? Set(MenuMetric.defaults) : parsed
+
+        let storedDetails = UserDefaults.standard.dictionary(forKey: Self.detailKey) as? [String: String] ?? [:]
+        details = storedDetails.reduce(into: [:]) { result, pair in
+            guard let metric = MenuMetric(rawValue: pair.key),
+                  let detail = MetricDetail(rawValue: pair.value) else { return }
+            result[metric] = detail
+        }
     }
 
     var ramPercent: Double {
@@ -75,15 +112,20 @@ final class Model: ObservableObject {
     }
 
     private func metricTitle(_ metric: MenuMetric) -> String {
+        let value = metricValue(metric)
+        return metric.tag.isEmpty ? value : metric.tag + " " + value
+    }
+
+    private func metricValue(_ metric: MenuMetric) -> String {
         switch metric {
         case .limit:
-            return usage.map { String(format: "%3.0f%%", $0.rolling.percent) } ?? " --%"
+            return usage.map { String(format: "%2.0f%%", $0.rolling.percent) } ?? "--%"
         case .cpu:
-            return String(format: "%3.0f%%", cpu)
+            return reading(cpu, label: "CPU", detail: detail(.cpu))
         case .gpu:
-            return gpuUsage.map { String(format: "%3.0f%%", $0) } ?? " --%"
+            return reading(gpuUsage, label: "GPU", detail: detail(.gpu))
         case .ram:
-            return String(format: "%3.0f%%", ramPercent)
+            return String(format: "%2.0f%%", ramPercent)
         case .fan:
             return fans.first.map { String(format: "%4.0f", $0.actual) } ?? "   -"
         case .net:
@@ -91,6 +133,23 @@ final class Model: ObservableObject {
         case .power:
             return power?.inputWatts.map { Fmt.pad(Fmt.wattsCompact($0), 4) } ?? "  -W"
         }
+    }
+
+    /// Percent, or the sensor reading for that group when the menu bar asks for it.
+    /// Falls back to percent when SMC has no reading, so the item never goes blank.
+    private func reading(_ value: Double?, label: String, detail: MetricDetail) -> String {
+        if detail == .temperature, let celsius = temps.first(where: { $0.label == label })?.celsius {
+            return String(format: "%2.0f°", celsius)
+        }
+        return value.map { String(format: "%2.0f%%", $0) } ?? "--%"
+    }
+
+    func detail(_ metric: MenuMetric) -> MetricDetail { details[metric] ?? .percent }
+
+    func setDetail(_ detail: MetricDetail, for metric: MenuMetric) {
+        details[metric] = detail
+        UserDefaults.standard.set(details.reduce(into: [String: String]()) { $0[$1.key.rawValue] = $1.value.rawValue },
+                                  forKey: Self.detailKey)
     }
 
     func toggleMetric(_ metric: MenuMetric) {

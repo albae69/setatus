@@ -48,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.target = self
             button.action = #selector(statusClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            button.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
+            button.font = .monospacedSystemFont(ofSize: 9, weight: .medium)
         }
         updateTitle()
 
@@ -109,10 +109,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let metricsItem = NSMenuItem(title: "Menu Bar", action: nil, keyEquivalent: "")
         let metricsMenu = NSMenu()
-        for metric in MenuMetric.allCases {
-            let entry = item(metric.title, #selector(toggleMetric(_:)))
-            entry.representedObject = metric.rawValue
-            metricsMenu.addItem(entry)
+        for (index, metric) in MenuMetric.allCases.enumerated() {
+            metricsMenu.addItem(metricItem(metric, index: index))
         }
         metricsItem.submenu = metricsMenu
         menu.addItem(metricsItem)
@@ -124,6 +122,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return menu
     }
 
+    /// CPU and GPU get a submenu with visibility plus percent/temperature, others stay flat.
+    private func metricItem(_ metric: MenuMetric, index: Int) -> NSMenuItem {
+        guard metric.hasDetail else {
+            let entry = item(metric.title, #selector(toggleMetric(_:)))
+            entry.representedObject = metric.rawValue
+            return entry
+        }
+
+        let entry = NSMenuItem(title: metric.title, action: nil, keyEquivalent: "")
+        entry.representedObject = metric.rawValue
+        let submenu = NSMenu()
+
+        let show = item("Show in menu bar", #selector(toggleMetric(_:)))
+        show.representedObject = metric.rawValue
+        submenu.addItem(show)
+        submenu.addItem(.separator())
+
+        for detail in MetricDetail.allCases {
+            let option = item(detail.title, #selector(selectDetail(_:)))
+            option.representedObject = detail.rawValue
+            option.tag = index
+            submenu.addItem(option)
+        }
+        entry.submenu = submenu
+        return entry
+    }
+
     private func item(_ title: String, _ action: Selector, _ key: String = "") -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.target = self
@@ -131,12 +156,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        if let submenu = menu.items.first(where: { $0.submenu != nil })?.submenu {
-            for entry in submenu.items {
+        if let metricsMenu = menu.items.first(where: { $0.submenu != nil })?.submenu {
+            for entry in metricsMenu.items {
                 guard let raw = entry.representedObject as? String,
                       let metric = MenuMetric(rawValue: raw) else { continue }
-                entry.state = model.metrics.contains(metric) ? .on : .off
-                entry.isEnabled = !(model.metrics.count == 1 && model.metrics.contains(metric))
+                let visible = model.metrics.contains(metric)
+                let locked = visible && model.metrics.count == 1
+
+                if let submenu = entry.submenu {
+                    entry.state = visible ? .on : .off
+                    for option in submenu.items where option.action == #selector(toggleMetric(_:)) {
+                        option.state = visible ? .on : .off
+                        option.isEnabled = !locked
+                    }
+                    for option in submenu.items where option.action == #selector(selectDetail(_:)) {
+                        let detail = MetricDetail(rawValue: option.representedObject as? String ?? "")
+                        option.state = detail == model.detail(metric) ? .on : .off
+                        option.isEnabled = visible
+                    }
+                } else {
+                    entry.state = visible ? .on : .off
+                    entry.isEnabled = !locked
+                }
             }
         }
         menu.items.first { $0.action == #selector(toggleLogin) }?.state = LaunchAtLogin.isEnabled ? .on : .off
@@ -156,6 +197,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let raw = sender.representedObject as? String,
               let metric = MenuMetric(rawValue: raw) else { return }
         model.toggleMetric(metric)
+        updateTitle()
+    }
+
+    @objc private func selectDetail(_ sender: NSMenuItem) {
+        let all = MenuMetric.allCases
+        guard all.indices.contains(sender.tag),
+              let detail = MetricDetail(rawValue: sender.representedObject as? String ?? "") else { return }
+        model.setDetail(detail, for: all[sender.tag])
         updateTitle()
     }
 
