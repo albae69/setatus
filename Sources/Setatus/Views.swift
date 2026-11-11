@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct PanelView: View {
@@ -30,7 +31,7 @@ struct PanelView: View {
 
     private var header: some View {
         HStack {
-            Text("Setatus").font(.headline)
+            wordmark
             Spacer()
             Button {
                 Task { await model.refreshUsage() }
@@ -40,6 +41,21 @@ struct PanelView: View {
             .buttonStyle(.borderless)
             .help("Refresh usage")
             .accessibilityLabel("Refresh usage")
+        }
+    }
+
+    private var wordmark: some View {
+        Group {
+            if let url = Bundle.main.url(forResource: "wordmark", withExtension: "png"),
+               let image = NSImage(contentsOf: url) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 15)
+                    .accessibilityLabel("Setatus")
+            } else {
+                Text("Setatus").font(.headline)
+            }
         }
     }
 
