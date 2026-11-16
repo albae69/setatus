@@ -16,10 +16,11 @@
 Setatus is a small, dependency-free AppKit + SwiftUI app that keeps the numbers you care
 about in the macOS menu bar. It reads OpenCode usage limits, CPU/GPU/RAM load, fan speed,
 network throughput, temperatures, and power input directly from the system — no agents,
-no telemetry, no background services beyond an optional privileged fan helper.
+no telemetry. The only background service is the fan helper daemon, installed once and
+kept idle until a manual fan target is set.
 
 ```text
-  1%   12%   13%   62%  2400  ↓1.2M ↑240K
+OC 42% CPU 12% GPU 13% RAM 62% 2.4k ↓1.2M ↑240K
  limit  cpu   gpu   ram   fan   net
 ```
 
@@ -64,7 +65,7 @@ Click the status item for details. Right-click it for actions.
 | CPU | Current CPU utilization |
 | GPU | GPU device utilization |
 | RAM | Memory used, as a percentage |
-| Fan | Current fan speed in RPM (number only) |
+| Fan | Current fan speed, compact (`2.4k` for 2400 rpm) |
 | Network | Download and upload rate |
 | Power | Optional system power input in watts |
 
@@ -74,19 +75,22 @@ from the right-click menu; the power input metric is off by default.
 
 ### Popover
 
-- **OpenCode limits** — 5-hour, weekly, and monthly percentages with reset countdowns,
-  plus today's request, token, and cost totals.
-- **CPU / GPU / RAM** — live usage, temperature readings, and meter bars.
-- **Power** — system power input (`SystemPowerIn`), negotiated adapter wattage, battery
-  percentage, and charging state.
-- **Uptime** — wall-clock time since boot, including time spent asleep.
-- **Fan** — live RPM, min/max/target values, a manual-control slider clamped to the SMC
-  range, and an Auto button.
-- **Internet** — download/upload speed, cumulative totals since boot, and the local IPv4
-  address.
-- **Processes** — top 20 processes by RAM in a scrollable list, with a two-step SIGTERM
-  confirmation.
-- **API key** — optional manual override for the OpenCode key.
+The panel is 340 pt wide and organised as cards on one surface:
+
+- **OpenCode limits** — the 5-hour window as the hero number with its reset countdown,
+  weekly and monthly windows as secondary columns, plus today's request, token, and cost
+  totals.
+- **System** — CPU, GPU, and RAM as three tiles with usage, temperature (RAM shows
+  used/total), and a thin meter; power input, uptime, and extra sensors as two info lines.
+- **Fan** — live RPM, an Auto/Manual pill, a slider clamped to the SMC range, min/target/max
+  labels, and an Auto button while manual control is active.
+- **Internet** — download/upload speed side by side, cumulative totals since boot, and the
+  local IPv4 address.
+- **Activity** — one card with a **Ports / Processes** segmented switch. Ports lists
+  listening processes on common dev ports (Vite, Next, CRA, Expo, Tauri…); Processes lists
+  the top 20 by RAM. Both use the same inline **SIGTERM?** confirmation before killing.
+- **API key** — optional manual override for the OpenCode key; the header shows the last
+  update time and a refresh button.
 
 ### Menu actions
 
@@ -95,8 +99,7 @@ Right-click (or Control-click) the status item:
 | Action | Description |
 | --- | --- |
 | Refresh | Reload usage and processes |
-| Fan Auto | Return fan control to the system |
-| Menu Bar | Toggle individual menu bar metrics |
+| Menu Bar | Toggle metrics, pick CPU/GPU percent or temperature, or reset to defaults |
 | Launch at Login | Install or remove a `~/Library/LaunchAgents` login item |
 | About Setatus | App name, icon, version, and author |
 | Quit Setatus | Restore the fan and exit |
@@ -129,6 +132,13 @@ The build script:
 4. Copies `Assets/AppIcon.icns`.
 5. Ad-hoc signs the bundle with `codesign --force --sign -`.
 
+To keep it in Applications:
+
+```sh
+ditto Setatus.app /Applications/Setatus.app
+open /Applications/Setatus.app
+```
+
 There is no DMG and no notarization. Because the bundle is ad-hoc signed, Gatekeeper may
 warn on first launch — open it from Finder with **Open** if that happens.
 
@@ -137,8 +147,9 @@ warn on first launch — open it from Finder with **Open** if that happens.
 1. Launch `Setatus.app`. It appears in the menu bar and does not show a Dock icon.
 2. Click the status item to open the popover.
 3. Right-click to choose which metrics appear, enable launch at login, or quit.
-4. To control the fan, drag the slider in the **Fan** section. Setatus asks for an
-   administrator password once, then keeps control until you select **Auto** or quit.
+4. To control the fan, drag the slider in the **Fan** card. The first time, Setatus installs
+   the root fan helper and asks for an administrator password once; later changes only write
+   a request file. Picking **Auto** (or quitting) returns the fan to the system.
 
 ## Configuration
 
@@ -147,6 +158,8 @@ warn on first launch — open it from Finder with **Open** if that happens.
 | Menu bar metrics | Right-click → **Menu Bar** (stored in `UserDefaults` under `menuMetrics`) |
 | Launch at login | Right-click → **Launch at Login** (`~/Library/LaunchAgents/dev.bae.setatus.plist`) |
 | OpenCode API key | Automatically read from 9router, or enter one in the popover |
+| Fan helper | `/Library/LaunchDaemons/dev.bae.setatus.fanhelper.plist` and `/Library/PrivilegedHelperTools/dev.bae.setatus.fanhelper` |
+| Fan request | `~/.config/setatus/fan.json`, logs in `~/.config/setatus/helper.log` |
 
 Setatus reads the OpenCode key from `~/.9router/db/data.sqlite`
 (`providerConnections` where `provider = 'opencode-go'`). A manually entered key is stored
@@ -174,24 +187,30 @@ minute.
 
 ## Fan control
 
-Fan control requires root. Setatus prompts for an administrator password **once** per
-helper lifetime, then starts a persistent helper:
+Fan control requires root, so Setatus installs a small launchd daemon **once**:
 
 ```text
-Setatus --fan-hold ~    (launched through osascript with administrator privileges)
+/Library/PrivilegedHelperTools/dev.bae.setatus.fanhelper --fan-daemon <home>
+/Library/LaunchDaemons/dev.bae.setatus.fanhelper.plist   (RunAtLoad, KeepAlive)
 ```
 
-The app writes the requested target to `~/.config/setatus/fan.json` and sends a heartbeat
-every 2 seconds. The helper:
+The first manual target triggers one administrator prompt that copies the app binary and
+the plist as `root:wheel`, then bootstraps the job. After that, changing the slider only
+writes `~/.config/setatus/fan.json` and sends a heartbeat every 2 seconds — no password.
+The install is repeated once (same single prompt) after an app update, because `installed`
+compares the SHA-256 of the bundle binary with the installed helper.
+
+The daemon:
 
 - clamps the target to the SMC minimum and maximum,
 - unlocks manual mode with `Ftst = 1` when the model requires it,
 - re-asserts control after wake,
-- restores automatic mode and exits when the request is older than 30 seconds or
-  `rpm = 0`,
-- rejects symlinked request files, files outside `~/.config/setatus`, and fan indices
-  without a matching SMC key,
-- appends start, engage, target, and exit reasons to `~/.config/setatus/helper.log`.
+- **idles** on an invalid, missing, or stale request, restores automatic mode, and keeps
+  running for the next request (a single bad read no longer kills it),
+- rejects symlinked request files, files outside `~/.config/setatus`, oversized files, and
+  fan indices without a matching SMC key,
+- appends start, engage, target, idle, and exit reasons to `~/.config/setatus/helper.log`,
+- writes installer output to `~/.config/setatus/install.log`.
 
 Quitting Setatus writes `rpm = 0`, so the fan returns to automatic control immediately.
 
@@ -204,8 +223,9 @@ Quitting Setatus writes `rpm = 0`, so the fan returns to automatic control immed
 
 - No telemetry, analytics, or third-party services.
 - The only outbound request is to `opencode.ai` for usage data.
-- The fan helper runs only while manual control is active and always restores automatic
-  mode on exit or timeout.
+- The fan helper is a root-owned launchd job. It stays resident but touches the SMC only
+  while a fresh request exists, always restores automatic mode when the request goes stale,
+  and accepts requests only from a regular file in `~/.config/setatus`.
 - A manually entered API key is stored in `UserDefaults` in plain text. Prefer the 9router
   database key if you keep secrets out of app preferences.
 
@@ -217,7 +237,8 @@ Quitting Setatus writes `rpm = 0`, so the fan returns to automatic control immed
 ./Setatus.app/Contents/MacOS/Setatus --open-panel # start with the popover open
 ```
 
-`--fan-hold <home>` is the internal privileged helper entry point.
+`--fan-daemon <home>` is the installed launchd helper entry point (`--fan-hold <home>` is
+the legacy foreground form).
 
 ## Project structure
 
@@ -233,12 +254,16 @@ Sources/Setatus/
   Network.swift       interface counters and local IP
   Power.swift         power input, adapter, battery
   Processes.swift     process list and SIGTERM
+  Ports.swift         dev port scan and killer
   Usage.swift         OpenCode limits and today's stats
   LaunchAtLogin.swift LaunchAgent login item
   Fmt.swift           adaptive, fixed-width number formatting
   Shell.swift         process runner helper
   SelfCheck.swift     command line checks
 scripts/build-app.sh  app bundle build
+scripts/make-ui.mjs   FigCraft source for the original UI capture
+scripts/make-ui-v2.mjs FigCraft source for the current (v2) UI
+Design/               FigCraft documents and exported previews
 Assets/AppIcon.icns   Finder icon
 Assets/menu-bar.png   Menu bar screenshot
 Assets/popover.png    Popover screenshot
@@ -257,25 +282,35 @@ or reuse `Fmt.pad`.
 
 **Fan control does nothing.**
 Some Apple Silicon models ignore SMC fan writes. Run `--selfcheck` and confirm that
-`F0Md`, `F0Tg`, and `Ftst` exist and are writable. Also confirm the helper is running:
+`F0Md`, `F0Tg`, and `Ftst` exist and are writable. Also confirm the daemon is loaded and
+running:
 
 ```sh
-pgrep -f -- --fan-hold
+pgrep -f -- --fan-daemon
+launchctl print system/dev.bae.setatus.fanhelper | head
 ```
 
 **Usage shows "No opencode-go key found".**
 Make sure 9router has an `opencode-go` connection in
 `~/.9router/db/data.sqlite`, or enter the key manually in the popover.
 
-**The password prompt appears on every slider move.**
-That means the root helper exited. Check the reason it logged:
+**The password prompt appears again.**
+Expected on the first manual target, and once after an app update (the helper binary is a
+root-owned copy, refreshed by hash). If it keeps prompting, the daemon is not staying up.
+Check:
 
 ```sh
-cat ~/.config/setatus/helper.log
+launchctl print system/dev.bae.setatus.fanhelper | head
+cat ~/.config/setatus/install.log
+tail -20 ~/.config/setatus/helper.log
 ```
 
-A stale request, an invalid fan index, or a request file outside `~/.config/setatus`
-makes the helper restore automatic mode and exit on purpose.
+Delete the helper to force a clean reinstall on the next manual target:
+
+```sh
+sudo rm -f /Library/LaunchDaemons/dev.bae.setatus.fanhelper.plist \
+  /Library/PrivilegedHelperTools/dev.bae.setatus.fanhelper
+```
 
 ## Limitations
 
@@ -285,6 +320,8 @@ makes the helper restore automatic mode and exit on purpose.
 - Network totals are kernel counters since boot, summed over non-loopback interfaces.
 - Single-instance detection compares resolved executable paths rather than using a
   system-wide lock.
+- The fan helper is a copy of the app binary, so an app update needs one admin prompt to
+  refresh it (handled automatically on the next manual target).
 - The app is not notarized and has no installer.
 
 ## Contributing
