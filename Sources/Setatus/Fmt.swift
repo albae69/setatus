@@ -28,6 +28,11 @@ enum Fmt {
         return (scaled >= 10 ? String(format: "%.0f", scaled) : String(format: "%.1f", scaled)) + units[unit]
     }
 
+    /// Fan speed in the menu bar: 2400 rpm reads as 2.4k.
+    static func fanCompact(_ rpm: Double) -> String {
+        rpm >= 1000 ? String(format: "%.1fk", rpm / 1000) : String(format: "%.0f", rpm)
+    }
+
     static func watts(_ value: Double) -> String {
         value >= 10 ? String(format: "%.0f W", value) : String(format: "%.1f W", value)
     }

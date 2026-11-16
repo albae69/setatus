@@ -82,6 +82,19 @@ enum SelfCheck {
             kill(other.processIdentifier, SIGKILL)
             other.waitUntilExit()
             print("killtest: reused pid", refused ? "ok" : "failed")
+
+            // Port killer: a live listener on a dev port must be found and signalled.
+            let server = Process()
+            server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            server.arguments = ["-m", "http.server", "24678"]
+            server.standardOutput = FileHandle.nullDevice
+            server.standardError = FileHandle.nullDevice
+            try? server.run()
+            Thread.sleep(forTimeInterval: 0.5)
+            let listener = Ports.scan().first { $0.pid == server.processIdentifier }
+            let sentPort = listener.map { Ports.kill($0) } ?? false
+            server.waitUntilExit()
+            print("killtest: port", sentPort && server.terminationReason == .uncaughtSignal ? "ok" : "failed")
         }
 
         print("cpu:", String(format: "%.1f%%", Metrics.cpuPercent()))
@@ -121,6 +134,7 @@ enum SelfCheck {
         }
 
         print("processes:", Processes.top(limit: 20).map { "\($0.name)(\($0.pid)) \(String(format: "%.0f", $0.memoryMB))MB" }.joined(separator: ", "))
+        print("ports:", Ports.scan().map { ":\($0.port) \($0.process)(\($0.pid))" }.joined(separator: ", "))
 
         if let key = UsageService.apiKey() {
             let semaphore = DispatchSemaphore(value: 0)
@@ -138,8 +152,19 @@ enum SelfCheck {
             print("usage: no key")
         }
 
-        if let today = UsageService.today() {
-            print("today:", today.requests, "req,", today.promptTokens + today.completionTokens, "tok")
+        // Model breakdown: 9router's usageDaily carries byModel; missing keys must not crash.
+        let sample = #"{"requests":3,"cost":0.3,"byModel":{"a|p":{"requests":2,"cost":0.25,"rawModel":"a","provider":"p"},"b|p":{"requests":1,"cost":0.05}}}"#
+        if let parsed = sample.data(using: .utf8).flatMap(UsageService.parseToday) {
+            let ok = parsed.models.count == 2 && parsed.models.first?.name == "a" && parsed.models.first?.cost == 0.25
+            print("modeltest:", ok ? "ok" : "failed \(parsed.models.map(\.name))")
+        } else {
+            print("modeltest: failed to parse")
+        }
+
+        if let today = UsageService.today() {            print("today:", today.requests, "req,", today.promptTokens + today.completionTokens, "tok")
+            print("models:", today.models.map {
+                "\($0.name)(\($0.requests) req, cached \($0.cachedTokens), $\(String(format: "%.3f", $0.cost)))"
+            }.joined(separator: ", "))
         }
 
         exit(0)

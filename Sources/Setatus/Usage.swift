@@ -17,6 +17,19 @@ struct TodayStats {
     let promptTokens: Int
     let completionTokens: Int
     let cost: Double
+    let models: [ModelStats]
+}
+
+struct ModelStats: Identifiable {
+    let name: String
+    let provider: String
+    let requests: Int
+    let promptTokens: Int
+    let completionTokens: Int
+    let cachedTokens: Int
+    let cost: Double
+
+    var id: String { "\(name)|\(provider)" }
 }
 
 enum UsageService {
@@ -90,17 +103,40 @@ enum UsageService {
         guard let raw = Shell.run("/usr/bin/sqlite3", ["-readonly", db, sql])?
             .trimmingCharacters(in: .whitespacesAndNewlines),
               let data = raw.data(using: .utf8), !raw.isEmpty else { return nil }
+        return parseToday(data)
+    }
 
+    static func parseToday(_ data: Data) -> TodayStats? {
         struct Payload: Decodable {
+            struct Model: Decodable {
+                let rawModel: String?
+                let provider: String?
+                let requests: Int?
+                let promptTokens: Int?
+                let completionTokens: Int?
+                let cachedTokens: Int?
+                let cost: Double?
+            }
             let requests: Int?
             let promptTokens: Int?
             let completionTokens: Int?
             let cost: Double?
+            let byModel: [String: Model]?
         }
         guard let payload = try? JSONDecoder().decode(Payload.self, from: data) else { return nil }
+        let models = (payload.byModel ?? [:]).map { key, model in
+            ModelStats(name: model.rawModel ?? key.split(separator: "|").first.map(String.init) ?? key,
+                       provider: model.provider ?? "",
+                       requests: model.requests ?? 0,
+                       promptTokens: model.promptTokens ?? 0,
+                       completionTokens: model.completionTokens ?? 0,
+                       cachedTokens: model.cachedTokens ?? 0,
+                       cost: model.cost ?? 0)
+        }.sorted { $0.cost > $1.cost }
         return TodayStats(requests: payload.requests ?? 0,
                           promptTokens: payload.promptTokens ?? 0,
                           completionTokens: payload.completionTokens ?? 0,
-                          cost: payload.cost ?? 0)
+                          cost: payload.cost ?? 0,
+                          models: models)
     }
 }

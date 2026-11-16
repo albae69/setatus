@@ -72,6 +72,8 @@ final class Model: ObservableObject {
     @Published private(set) var details: [MenuMetric: MetricDetail] = [:]
     @Published var processes: [ProcessRow] = []
     @Published var killError: String?
+    @Published var ports: [PortListener] = []
+    @Published var portError: String?
     @Published var usage: Usage?
     @Published var today: TodayStats?
     @Published var usageError: String?
@@ -82,12 +84,12 @@ final class Model: ObservableObject {
     private var metricsTimer: Timer?
     private var tickPending = false
     private var processPending = false
+    private var portPending = false
     private var usageTimer: Timer?
     private var processTimer: Timer?
     private var started = false
     private var fanInitialized = false
     private var desiredFanRPM = 0
-    private var startingHelper = false
 
     init() {
         let stored = UserDefaults.standard.stringArray(forKey: MenuMetric.storageKey)
@@ -127,7 +129,7 @@ final class Model: ObservableObject {
         case .ram:
             return String(format: "%2.0f%%", ramPercent)
         case .fan:
-            return fans.first.map { String(format: "%4.0f", $0.actual) } ?? "   -"
+            return fans.first.map { Fmt.pad(Fmt.fanCompact($0.actual), 4) } ?? "   -"
         case .net:
             return "↓\(Fmt.pad(Fmt.rate(netDown), 4)) ↑\(Fmt.pad(Fmt.rate(netUp), 4))"
         case .power:
@@ -150,6 +152,13 @@ final class Model: ObservableObject {
         details[metric] = detail
         UserDefaults.standard.set(details.reduce(into: [String: String]()) { $0[$1.key.rawValue] = $1.value.rawValue },
                                   forKey: Self.detailKey)
+    }
+
+    func resetMenuMetrics() {
+        metrics = Set(MenuMetric.defaults)
+        details = [:]
+        UserDefaults.standard.set(metrics.map(\.rawValue), forKey: MenuMetric.storageKey)
+        UserDefaults.standard.removeObject(forKey: Self.detailKey)
     }
 
     func toggleMetric(_ metric: MenuMetric) {
@@ -235,33 +244,32 @@ final class Model: ObservableObject {
         }
 
         let target = Int(min(max(Double(rpm), fan.minimum), fan.maximum))
+        if !FanControl.installed || !FanControl.helperRunning() {
+            let installed = await Task.detached { FanControl.install() }.value
+            guard installed else {
+                desiredFanRPM = 0
+                fanRunning = false
+                fanMessage = "fan helper install cancelled"
+                return
+            }
+        }
+
         desiredFanRPM = target
         fanTarget = Double(target)
         fanMessage = "manual \(target) rpm"
         FanControl.send(fan: fan.index, rpm: target)
 
-        let helperUp = await Task.detached { FanControl.helperRunning() }.value
-        guard !startingHelper, !helperUp else { return }
-        startingHelper = true
-        Task {
-            let started = await Task.detached { FanControl.startHelper() }.value
-            guard started else {
-                fanMessage = "admin cancelled"
-                startingHelper = false
-                return
+        var running = false
+        for _ in 0..<40 {
+            if await Task.detached(operation: { FanControl.helperRunning() }).value {
+                running = true
+                break
             }
-            var running = false
-            for _ in 0..<80 {
-                let up = await Task.detached { FanControl.helperRunning() }.value
-                if up {
-                    running = true
-                    break
-                }
-                try? await Task.sleep(nanoseconds: 250_000_000)
-            }
-            startingHelper = false
-            fanRunning = running
-            fanMessage = running ? "manual \(target) rpm" : "helper failed — see ~/.config/setatus/helper.log"
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        fanRunning = running
+        if !running {
+            fanMessage = "helper failed — see ~/.config/setatus/helper.log"
         }
     }
 
@@ -295,8 +303,29 @@ final class Model: ObservableObject {
         refreshProcesses()
     }
 
-    func refreshUsage() async {
-        // sqlite3 spawns behind the key/today lookups; keep them off the main actor.
+    func refreshPorts() {
+        guard !portPending else { return }
+        portPending = true
+        let work = Task.detached { Ports.scan() }
+        Task { [weak self] in
+            let rows = await work.value
+            self?.ports = rows
+            self?.portPending = false
+        }
+    }
+
+    func killPort(_ row: PortListener) async {
+        let sent = await Task.detached { Ports.kill(row) }.value
+        if sent {
+            portError = nil
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        } else {
+            portError = "Cannot kill \(row.process) (pid \(row.pid)) — port changed or permission denied"
+        }
+        refreshPorts()
+    }
+
+    func refreshUsage() async {        // sqlite3 spawns behind the key/today lookups; keep them off the main actor.
         let key = await Task.detached { UsageService.apiKey() }.value
         guard let key else {
             usage = nil

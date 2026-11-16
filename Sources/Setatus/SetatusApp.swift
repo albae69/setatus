@@ -4,7 +4,7 @@ import AppKit
 @main
 struct SetatusApp {
     static func main() {
-        if let index = CommandLine.arguments.firstIndex(of: "--fan-hold"),
+        if let index = CommandLine.arguments.firstIndex(where: { $0 == "--fan-daemon" || $0 == "--fan-hold" }),
            index + 1 < CommandLine.arguments.count {
             FanControl.hold(home: CommandLine.arguments[index + 1])
         }
@@ -104,7 +104,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
 
         menu.addItem(item("Refresh", #selector(refreshAll), "r"))
-        menu.addItem(item("Fan Auto", #selector(fanAuto)))
         menu.addItem(.separator())
 
         let metricsItem = NSMenuItem(title: "Menu Bar", action: nil, keyEquivalent: "")
@@ -112,6 +111,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for (index, metric) in MenuMetric.allCases.enumerated() {
             metricsMenu.addItem(metricItem(metric, index: index))
         }
+        metricsMenu.addItem(.separator())
+        metricsMenu.addItem(item("Reset to Defaults", #selector(resetMetrics)))
         metricsItem.submenu = metricsMenu
         menu.addItem(metricsItem)
 
@@ -186,11 +187,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func refreshAll() {
         updateTitle()
         model.refreshProcesses()
+        model.refreshPorts()
         Task { await model.refreshUsage() }
     }
 
-    @objc private func fanAuto() {
-        Task { await model.applyFan(0) }
+    @objc private func resetMetrics() {
+        model.resetMenuMetrics()
+        updateTitle()
     }
 
     @objc private func toggleMetric(_ sender: NSMenuItem) {

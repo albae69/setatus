@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import CryptoKit
 import os
 
 struct FanRequest: Codable {
@@ -10,6 +11,24 @@ struct FanRequest: Codable {
 
 enum FanControl {
     static let staleAfter: TimeInterval = 30
+
+    private static let daemonLabel = "dev.bae.setatus.fanhelper"
+    private static let helperPath = "/Library/PrivilegedHelperTools/\(daemonLabel)"
+    private static let plistPath = "/Library/LaunchDaemons/\(daemonLabel).plist"
+
+    /// Installed and running this app build: an update copies the new binary in with one prompt.
+    static var installed: Bool {
+        guard FileManager.default.fileExists(atPath: plistPath),
+              let executable = Bundle.main.executablePath,
+              let appHash = hash(executable),
+              let helperHash = hash(helperPath) else { return false }
+        return appHash == helperHash
+    }
+
+    private static func hash(_ path: String) -> SHA256Digest? {
+        guard let data = FileManager.default.contents(atPath: path) else { return nil }
+        return SHA256.hash(data: data)
+    }
 
     static func requestURL(home: String = NSHomeDirectory()) -> URL {
         URL(fileURLWithPath: home).appendingPathComponent(".config/setatus/fan.json")
@@ -26,28 +45,71 @@ enum FanControl {
     }
 
     static func helperRunning() -> Bool {
-        guard let output = Shell.run("/usr/bin/pgrep", ["-f", "--", "--fan-hold"]) else { return false }
+        guard let output = Shell.run("/usr/bin/pgrep", ["-f", "--", "--fan-daemon"]) else { return false }
         return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private static var helperProcess: Process?
-
-    /// One admin prompt, then the helper keeps control until the request goes stale or auto is requested.
-    /// Kept in the foreground of the privileged shell so the helper is not killed when the
-    /// authorization session ends; the caller polls `helperRunning()` instead of waiting.
-    static func startHelper(home: String = NSHomeDirectory()) -> Bool {
+    /// One admin prompt ever: the app binary and a launchd job are installed root-owned,
+    /// so later fan changes just write fan.json and the daemon picks it up.
+    static func install(home: String = NSHomeDirectory()) -> Bool {
         guard let executable = Bundle.main.executablePath else { return false }
-        let command = "\(quoted(executable)) --fan-hold \(quoted(home))"
-        let script = "do shell script \"\(command) >/dev/null 2>&1\" with administrator privileges"
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>Label</key><string>\(daemonLabel)</string>
+          <key>ProgramArguments</key>
+          <array>
+            <string>\(helperPath)</string>
+            <string>--fan-daemon</string>
+            <string>\(home)</string>
+          </array>
+          <key>RunAtLoad</key><true/>
+          <key>KeepAlive</key><true/>
+          <key>ThrottleInterval</key><integer>5</integer>
+        </dict>
+        </plist>
+        """
+        guard let encoded = plist.data(using: .utf8)?.base64EncodedString() else { return false }
 
+        let script = """
+        set -e
+        mkdir -p /Library/PrivilegedHelperTools
+        launchctl bootout system/\(daemonLabel) 2>/dev/null || true
+        for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -f -- --fan-daemon >/dev/null || break; sleep 0.5; done
+        cp \(quoted(executable)) \(quoted(helperPath))
+        chown root:wheel \(quoted(helperPath))
+        chmod 755 \(quoted(helperPath))
+        echo \(encoded) | /usr/bin/base64 -D > \(quoted(plistPath))
+        chown root:wheel \(quoted(plistPath))
+        chmod 644 \(quoted(plistPath))
+        launchctl bootstrap system \(quoted(plistPath)) || { sleep 1; launchctl bootstrap system \(quoted(plistPath)); }
+        launchctl enable system/\(daemonLabel)
+        launchctl kickstart -k system/\(daemonLabel)
+        """
+        return runAdmin(script)
+    }
+
+    /// Runs a shell script as root through one authorization prompt; blocks until it finishes.
+    private static func runAdmin(_ script: String) -> Bool {
+        let escaped = script
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "; ")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        process.standardError = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
+        process.arguments = ["-e", "do shell script \"\(escaped)\" with administrator privileges"]
+        let logURL = requestURL().deletingLastPathComponent().appendingPathComponent("install.log")
+        try? FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        let logHandle = try? FileHandle(forWritingTo: logURL)
+        process.standardError = logHandle ?? FileHandle.nullDevice
+        process.standardOutput = logHandle ?? FileHandle.nullDevice
         do { try process.run() } catch { return false }
-        helperProcess = process
-        return true
+        process.waitUntilExit()
+        return process.terminationStatus == 0 && installed
     }
 
     /// Single-quote for the admin shell script; paths may contain quotes or spaces.
@@ -58,7 +120,8 @@ enum FanControl {
     // MARK: - Privileged helper
 
     static func hold(home: String) -> Never {
-        log("start euid=\(geteuid())", home: home)
+        let daemon = CommandLine.arguments.contains("--fan-daemon")
+        log("start euid=\(geteuid()) daemon=\(daemon)", home: home)
         guard geteuid() == 0, let smc = SMC() else {
             log("exit: not root or SMC unavailable", home: home)
             exit(2)
@@ -79,6 +142,7 @@ enum FanControl {
             .appendingPathComponent(".config/setatus")
             .resolvingSymlinksInPath()
         var engaged = false
+        var hardwareEngaged = false
         var announcedRPM = -1
         var lastModeCheck = Date.distantPast
 
@@ -89,19 +153,27 @@ enum FanControl {
                 exit(0)
             }
 
-            let now = Date().timeIntervalSince1970
-            guard let data = safeContents(url, directory: expectedDirectory),
-                  let request = try? JSONDecoder().decode(FanRequest.self, from: data),
-                  now - request.updated < staleAfter,
-                  request.rpm > 0,
-                  validFan(smc, request.fan) else {
-                log("exit: no valid request", home: home)
-                restore(smc)
-                exit(0)
+            guard let request = currentRequest(smc, url: url, directory: expectedDirectory) else {
+                // A daemon must outlive one bad read, a sleep or an atomic rename;
+                // it only idles until the next valid request arrives.
+                if hardwareEngaged {
+                    log("idle: no valid request", home: home)
+                    restore(smc)
+                    hardwareEngaged = false
+                    engaged = false
+                    announcedRPM = -1
+                }
+                guard daemon else {
+                    log("exit: no valid request", home: home)
+                    exit(0)
+                }
+                usleep(1_000_000)
+                continue
             }
 
             if !engaged {
                 engaged = engage(smc, fan: request.fan)
+                hardwareEngaged = engaged
                 log("engage fan=\(request.fan) -> \(engaged)", home: home)
             }
 
@@ -109,6 +181,7 @@ enum FanControl {
                 lastModeCheck = Date()
                 if let key = modeKey(smc, fan: request.fan), smc.readUInt8(key) != 1 {
                     engaged = false
+                    hardwareEngaged = false
                 }
             }
 
@@ -128,6 +201,17 @@ enum FanControl {
 
             usleep(1_000_000)
         }
+    }
+
+    /// The current request, only when fresh and pointing at a fan this Mac has.
+    private static func currentRequest(_ smc: SMC, url: URL, directory: URL) -> FanRequest? {
+        let now = Date().timeIntervalSince1970
+        guard let data = safeContents(url, directory: directory),
+              let request = try? JSONDecoder().decode(FanRequest.self, from: data),
+              now - request.updated < staleAfter,
+              request.rpm > 0,
+              validFan(smc, request.fan) else { return nil }
+        return request
     }
 
     private static func log(_ message: String, home: String) {
