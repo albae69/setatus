@@ -86,8 +86,8 @@ The panel is 340 pt wide and organised as cards on one surface:
   labels, and an Auto button while manual control is active.
 - **Internet** — download/upload speed side by side, cumulative totals since boot, and the
   local IPv4 address.
-- **Activity** — one card with a **Ports / Processes** segmented switch. Ports lists
-  listening processes on common dev ports (Vite, Next, CRA, Expo, Tauri…); Processes lists
+- **Activity** — one card with a **Ports / Processes** segmented switch. Ports lists every
+  process listening on a TCP port; Processes lists
   the top 20 by RAM. Both use the same inline **SIGTERM?** confirmation before killing.
 - **API key** — optional manual override for the OpenCode key; the header shows the last
   update time and a refresh button.

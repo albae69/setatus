@@ -325,7 +325,7 @@ struct PanelView: View {
     private var portList: some View {
         VStack(alignment: .leading, spacing: 0) {
             if model.ports.isEmpty {
-                Text("No dev port in use").font(.caption2).foregroundStyle(.secondary)
+                Text("No listening port").font(.caption2).foregroundStyle(.secondary)
                     .frame(height: 90, alignment: .topLeading)
             } else {
                 ScrollView {
