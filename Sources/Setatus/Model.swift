@@ -276,7 +276,7 @@ final class Model: ObservableObject {
     func refreshProcesses() {
         guard !processPending else { return }
         processPending = true
-        let work = Task.detached { Processes.top(limit: 6) }
+        let work = Task.detached { Processes.top(limit: 20) }
         Task { [weak self] in
             let rows = await work.value
             self?.processes = rows

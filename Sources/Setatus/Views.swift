@@ -207,43 +207,49 @@ struct PanelView: View {
                 .accessibilityLabel("Refresh processes")
             }
 
-            ForEach(model.processes) { row in
-                HStack(spacing: 6) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(row.name)
-                            .font(.caption)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Text("\(row.pid) · \(String(format: "%.1f%%", row.cpu)) · \(String(format: "%.0f MB", row.memoryMB))")
-                            .font(.caption2)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if confirmPID == row.pid {
-                        Text("SIGTERM?")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Button("Kill") {
-                            confirmPID = nil
-                            Task { await model.kill(row) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(model.processes) { row in
+                        HStack(spacing: 6) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(row.name)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text("\(row.pid) · \(String(format: "%.1f%%", row.cpu)) · \(String(format: "%.0f MB", row.memoryMB))")
+                                    .font(.caption2)
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if confirmPID == row.pid {
+                                Text("SIGTERM?")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Button("Kill") {
+                                    confirmPID = nil
+                                    Task { await model.kill(row) }
+                                }
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(.red)
+                                Button("Cancel") { confirmPID = nil }
+                                    .buttonStyle(.borderless)
+                            } else {
+                                Button {
+                                    confirmPID = row.pid
+                                } label: {
+                                    Image(systemName: "xmark.circle")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Kill \(row.name)")
+                                .accessibilityLabel("Kill \(row.name)")
+                            }
                         }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.red)
-                        Button("Cancel") { confirmPID = nil }
-                            .buttonStyle(.borderless)
-                    } else {
-                        Button {
-                            confirmPID = row.pid
-                        } label: {
-                            Image(systemName: "xmark.circle")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Kill \(row.name)")
-                        .accessibilityLabel("Kill \(row.name)")
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(height: 220)
 
             if let error = model.killError {
                 Text(error).font(.caption2).foregroundStyle(.red)

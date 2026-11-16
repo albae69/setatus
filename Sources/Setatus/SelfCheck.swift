@@ -120,7 +120,7 @@ enum SelfCheck {
             print("smc: unavailable")
         }
 
-        print("processes:", Processes.top(limit: 6).map { "\($0.name)(\($0.pid)) \(String(format: "%.1f", $0.cpu))%" }.joined(separator: ", "))
+        print("processes:", Processes.top(limit: 20).map { "\($0.name)(\($0.pid)) \(String(format: "%.0f", $0.memoryMB))MB" }.joined(separator: ", "))
 
         if let key = UsageService.apiKey() {
             let semaphore = DispatchSemaphore(value: 0)

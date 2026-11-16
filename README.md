@@ -84,7 +84,8 @@ from the right-click menu; the power input metric is off by default.
   range, and an Auto button.
 - **Internet** — download/upload speed, cumulative totals since boot, and the local IPv4
   address.
-- **Processes** — top six processes by CPU with a two-step SIGTERM confirmation.
+- **Processes** — top 20 processes by RAM in a scrollable list, with a two-step SIGTERM
+  confirmation.
 - **API key** — optional manual override for the OpenCode key.
 
 ### Menu actions

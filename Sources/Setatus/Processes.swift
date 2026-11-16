@@ -15,7 +15,7 @@ struct ProcessRow: Identifiable {
 }
 
 enum Processes {
-    static func top(limit: Int = 8) -> [ProcessRow] {
+    static func top(limit: Int = 20) -> [ProcessRow] {
         let listedAt = Date()
         guard let output = Shell.run("/bin/ps", ["-axo", "pid=,pcpu=,rss=,etime=,comm="]) else { return [] }
         let selfPID = ProcessInfo.processInfo.processIdentifier
@@ -34,7 +34,7 @@ enum Processes {
                                    elapsed: elapsed, listedAt: listedAt))
         }
 
-        return Array(rows.sorted { $0.cpu > $1.cpu }.prefix(limit))
+        return Array(rows.sorted { $0.memoryMB > $1.memoryMB }.prefix(limit))
     }
 
     /// Seconds since the process started, nil when the PID is gone.
