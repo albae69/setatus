@@ -2,12 +2,13 @@
 
 # Setatus
 
-**A native macOS menu bar monitor for OpenCode usage, system load, and fans.**
+**A native macOS menu bar monitor for OpenCode usage, system load, fans, and battery charge.**
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-black?logo=apple)](#requirements)
 [![Swift](https://img.shields.io/badge/swift-5.9-orange?logo=swift)](#requirements)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)](#requirements)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue)](CHANGELOG.md)
 [![Status](https://img.shields.io/badge/status-personal%20project-blue)](https://github.com/albae69/setatus)
 [![GitHub stars](https://img.shields.io/github/stars/albae69/setatus?style=social)](https://github.com/albae69/setatus)
 
@@ -17,7 +18,7 @@ Setatus is a small, dependency-free AppKit + SwiftUI app that keeps the numbers 
 about in the macOS menu bar. It reads OpenCode usage limits, CPU/GPU/RAM load, fan speed,
 network throughput, temperatures, and power input directly from the system — no agents,
 no telemetry. The only background service is the fan helper daemon, installed once and
-kept idle until a manual fan target is set.
+kept idle until a manual fan target or charge limit is set.
 
 ```text
 OC 42% CPU 12% GPU 13% RAM 62% 2.4k ↓1.2M ↑240K
@@ -46,12 +47,13 @@ Click the status item for details. Right-click it for actions.
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [How it works](#how-it-works)
-- [Fan control](#fan-control)
+- [Fan and charge control](#fan-and-charge-control)
 - [Privacy and security](#privacy-and-security)
 - [Command line](#command-line)
 - [Project structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
 - [Limitations](#limitations)
+- [Changelog](#changelog)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -81,11 +83,12 @@ The panel is 340 pt wide and organised as cards on one surface:
   weekly and monthly windows as secondary columns, plus today's request, token, and cost
   totals.
 - **System** — CPU, GPU, and RAM as three tiles with usage, temperature (RAM shows
-  used/total), and a thin meter; power input, uptime, and extra sensors as two info lines.
+  used/total), and a thin meter; power input, charge limit slider (root helper holds the
+  battery at the set percent via SMC), uptime, and extra sensors as info lines.
 - **Fan** — live RPM, an Auto/Manual pill, a slider clamped to the SMC range, min/target/max
   labels, and an Auto button while manual control is active.
-- **Internet** — download/upload speed side by side, cumulative totals since boot, and the
-  local IPv4 address.
+- **Internet** — download/upload speed side by side, cumulative totals since boot, the
+  local IPv4 address, and a **Speed test** button (Cloudflare download/upload, Mbps).
 - **Activity** — one card with a **Ports / Processes** segmented switch. Ports lists every
   process listening on a TCP port; Processes lists
   the top 20 by RAM. Both use the same inline **SIGTERM?** confirmation before killing.
@@ -102,6 +105,7 @@ Right-click (or Control-click) the status item:
 | Menu Bar | Toggle metrics, pick CPU/GPU percent or temperature, or reset to defaults |
 | Launch at Login | Install or remove a `~/Library/LaunchAgents` login item |
 | About Setatus | App name, icon, version, and author |
+| Uninstall Setatus… | Remove the fan helper, login item, config, and `Setatus.app`, then confirm |
 | Quit Setatus | Restore the fan and exit |
 
 ## Requirements
@@ -150,6 +154,10 @@ warn on first launch — open it from Finder with **Open** if that happens.
 4. To control the fan, drag the slider in the **Fan** card. The first time, Setatus installs
    the root fan helper and asks for an administrator password once; later changes only write
    a request file. Picking **Auto** (or quitting) returns the fan to the system.
+5. To hold the battery at a given charge, drag the **Charge limit** slider in the **System**
+   card. Set it to 100 (or **off**) to resume normal charging.
+6. Right-click → **Uninstall Setatus…** stops the helper, removes the login item and config,
+   and deletes the app once you confirm.
 
 ## Configuration
 
@@ -158,8 +166,9 @@ warn on first launch — open it from Finder with **Open** if that happens.
 | Menu bar metrics | Right-click → **Menu Bar** (stored in `UserDefaults` under `menuMetrics`) |
 | Launch at login | Right-click → **Launch at Login** (`~/Library/LaunchAgents/dev.bae.setatus.plist`) |
 | OpenCode API key | Automatically read from 9router, or enter one in the popover |
+| Charge limit | Popover slider (stored in `UserDefaults` under `chargeLimit`, 100 means off) |
 | Fan helper | `/Library/LaunchDaemons/dev.bae.setatus.fanhelper.plist` and `/Library/PrivilegedHelperTools/dev.bae.setatus.fanhelper` |
-| Fan request | `~/.config/setatus/fan.json`, logs in `~/.config/setatus/helper.log` |
+| Fan and charge requests | `~/.config/setatus/fan.json` and `charge.json`, logs in `~/.config/setatus/helper.log` |
 
 Setatus reads the OpenCode key from `~/.9router/db/data.sqlite`
 (`providerConnections` where `provider = 'opencode-go'`). A manually entered key is stored
@@ -177,26 +186,29 @@ in `UserDefaults`.
 | Local IP address | `getifaddrs`, preferring `en0` |
 | Power input | `AppleSmartBattery` → `PowerTelemetryData.SystemPowerIn` (mW) |
 | Battery state | `IOPSCopyPowerSourcesInfo` |
+| Charge limit | SMC charging key (`CHTE`, `CH0B`, or `CHWA`) via the root helper |
 | Uptime | `sysctl` `KERN_BOOTTIME` |
 | OpenCode usage | `GET https://opencode.ai/zen/go/v1/usage` |
 | Today's usage | 9router `usageDaily` table |
+| Speed test | `https://speed.cloudflare.com/__down` and `__up` |
 
 The app uses a single `NSStatusItem` with a custom font and an `NSPopover` for the panel.
 Metrics refresh every 2 seconds, processes every 5 seconds, and OpenCode usage every
 minute.
 
-## Fan control
+## Fan and charge control
 
-Fan control requires root, so Setatus installs a small launchd daemon **once**:
+Fan and charge control require root, so Setatus installs a small launchd daemon **once**:
 
 ```text
 /Library/PrivilegedHelperTools/dev.bae.setatus.fanhelper --fan-daemon <home>
 /Library/LaunchDaemons/dev.bae.setatus.fanhelper.plist   (RunAtLoad, KeepAlive)
 ```
 
-The first manual target triggers one administrator prompt that copies the app binary and
-the plist as `root:wheel`, then bootstraps the job. After that, changing the slider only
-writes `~/.config/setatus/fan.json` and sends a heartbeat every 2 seconds — no password.
+The first fan target or charge limit triggers one administrator prompt that copies the app
+binary and the plist as `root:wheel`, then bootstraps the job. After that, changing the fan
+slider only writes `~/.config/setatus/fan.json` and sends a heartbeat every 2 seconds, and
+changing the charge limit only writes `charge.json` — no password.
 The install is repeated once (same single prompt) after an app update, because `installed`
 compares the SHA-256 of the bundle binary with the installed helper.
 
@@ -212,6 +224,14 @@ The daemon:
 - appends start, engage, target, idle, and exit reasons to `~/.config/setatus/helper.log`,
 - writes installer output to `~/.config/setatus/install.log`.
 
+The same daemon applies the charge limit: it pauses charging when the battery reaches the
+chosen percent and resumes 2 points below it, writes `charge-state.json` for the popover,
+and releases the SMC key when the limit is set back to 100. The limit applies only while a
+fresh `charge.json` request exists, so the app re-sends it every 2 seconds while a limit is
+active, and the daemon reads the SMC key back each tick to rewrite it if the firmware
+drifted. The key is `CHTE` (`ui32`) on current Apple Silicon firmware, or `CHWA`/`CH0B`
+(`ui8`) on older ones; machines without one get a disabled slider and a note.
+
 Quitting Setatus writes `rpm = 0`, so the fan returns to automatic control immediately.
 
 > [!WARNING]
@@ -221,11 +241,12 @@ Quitting Setatus writes `rpm = 0`, so the fan returns to automatic control immed
 
 ## Privacy and security
 
-- No telemetry, analytics, or third-party services.
-- The only outbound request is to `opencode.ai` for usage data.
+- No telemetry or analytics.
+- Outbound requests go to `opencode.ai` for usage data, and to `speed.cloudflare.com` only
+  when you press **Speed test**. No other third-party service is contacted.
 - The fan helper is a root-owned launchd job. It stays resident but touches the SMC only
-  while a fresh request exists, always restores automatic mode when the request goes stale,
-  and accepts requests only from a regular file in `~/.config/setatus`.
+  while a fresh fan or charge request exists, always restores automatic fan mode when the
+  request goes stale, and accepts requests only from a regular file in `~/.config/setatus`.
 - A manually entered API key is stored in `UserDefaults` in plain text. Prefer the 9router
   database key if you keep secrets out of app preferences.
 
@@ -235,6 +256,10 @@ Quitting Setatus writes `rpm = 0`, so the fan returns to automatic control immed
 ./Setatus.app/Contents/MacOS/Setatus --selfcheck  # print sensor, network, and usage readings
 ./Setatus.app/Contents/MacOS/Setatus --killtest   # verify process termination
 ./Setatus.app/Contents/MacOS/Setatus --open-panel # start with the popover open
+./Setatus.app/Contents/MacOS/Setatus --charge     # list charge keys and check limit hysteresis
+./Setatus.app/Contents/MacOS/Setatus --charge-write # probe the charge key write/read/release (root only)
+./Setatus.app/Contents/MacOS/Setatus --smc        # dump charging-related SMC keys
+./Setatus.app/Contents/MacOS/Setatus --speedtest  # run the Cloudflare speed test
 ```
 
 `--fan-daemon <home>` is the installed launchd helper entry point (`--fan-hold <home>` is
@@ -248,7 +273,8 @@ Sources/Setatus/
   Model.swift         observable state, timers, menu bar title, metric selection
   Views.swift         SwiftUI popover layout
   Sensors.swift       SMC access: temperatures, fans, key read/write
-  FanControl.swift    root helper, request file, fan restore
+  FanControl.swift    root helper, request files, fan restore
+  Charge.swift        battery charge limit request and state
   Metrics.swift       CPU and RAM sampling
   GPU.swift           GPU utilization
   Network.swift       interface counters and local IP
@@ -315,6 +341,8 @@ sudo rm -f /Library/LaunchDaemons/dev.bae.setatus.fanhelper.plist \
 ## Limitations
 
 - Fan control is hardware-dependent.
+- Charge limiting is hardware-dependent: the SMC must expose `CHTE`, `CH0B`, or `CHWA`.
+  The slider shows a message and stays disabled when no key exists.
 - GPU utilization is only available when the accelerator exposes
   `Device Utilization %`.
 - Network totals are kernel counters since boot, summed over non-loopback interfaces.
@@ -323,6 +351,10 @@ sudo rm -f /Library/LaunchDaemons/dev.bae.setatus.fanhelper.plist \
 - The fan helper is a copy of the app binary, so an app update needs one admin prompt to
   refresh it (handled automatically on the next manual target).
 - The app is not notarized and has no installer.
+
+## Changelog
+
+Release history and notable changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 

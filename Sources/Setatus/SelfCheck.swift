@@ -9,6 +9,93 @@ enum SelfCheck {
             exit(0)
         }
 
+        if CommandLine.arguments.contains("--charge") {
+            let smc = SMC()
+            let keys = ["CHTE", "CH0B", "CHWA"].map { "\($0)=\(smc?.meta($0) != nil ? "present" : "missing")" }
+            let battery = Power.batteryPercent().map { String(format: "%.0f%%", $0) } ?? "—"
+            print("charge: battery=\(battery) \(keys.joined(separator: " "))")
+            if let state = ChargeControl.state() {
+                print("charge: state limit=\(state.limit) inhibited=\(state.inhibited) supported=\(state.supported) percent=\(state.percent.map { String(format: "%.0f", $0) } ?? "—")")
+            } else {
+                print("charge: state none")
+            }
+            let cases: [(Int, Double, Bool, ChargeControl.Action)] = [
+                (80, 80, false, .inhibit), (80, 90, true, .none), (80, 78, true, .resume),
+                (80, 79, true, .none), (100, 95, true, .resume), (0, 90, false, .none),
+            ]
+            let ok = cases.allSatisfy { ChargeControl.action(limit: $0.0, percent: $0.1, inhibited: $0.2) == $0.3 }
+            print("chargetest:", ok ? "ok" : "failed")
+
+            let keyCases: [(Set<String>, String?)] = [
+                (["CHTE", "CH0B", "CHWA"], "CHTE"),
+                (["CH0B", "CHWA"], "CH0B"),
+                (["CHWA"], "CHWA"),
+                ([], nil),
+            ]
+            let keysOK = keyCases.allSatisfy { set, expected in
+                ChargeControl.keyName { set.contains($0) } == expected
+            }
+            print("chargetest keys:", keysOK ? "ok" : "failed")
+
+            let prefixes = ["CH", "B0", "BU", "AC", "BC"]
+            let names = smc?.keyNames() ?? []
+            let matching = names.filter { name in
+                prefixes.contains { name.hasPrefix($0) }
+            }
+            print("charge: smc keys total=\(smc?.keyCount ?? 0) listed=\(names.count)")
+            print("charge: keys", matching.map { name in
+                let meta = smc?.meta(name)
+                return "\(name)(\(meta?.type ?? "?")/\(meta?.size ?? 0))"
+            }.joined(separator: " "))
+            if let bytes = smc?.readBytes("CHTE") {
+                print("charge: CHTE bytes", bytes.map { String(format: "%02x", $0) }.joined(separator: " "))
+            }
+            for key in ["CHSC", "CHCC", "CHCE"] {
+                print("charge: \(key)", smc?.readUInt8(key).map(String.init) ?? "—")
+            }
+            if let bytes = smc?.readBytes("CHNC") {
+                print("charge: CHNC bytes", bytes.map { String(format: "%02x", $0) }.joined(separator: " "))
+            }
+            if let bytes = smc?.readBytes("CH0R") {
+                print("charge: CH0R bytes", bytes.map { String(format: "%02x", $0) }.joined(separator: " "))
+            }
+            exit(0)
+        }
+
+        if CommandLine.arguments.contains("--charge-write") {
+            guard let smc = SMC() else { print("smc unavailable"); exit(1) }
+            for key in ["CHTE", "CH0B", "CHWA"] {
+                guard let meta = smc.meta(key) else { print("\(key) missing"); continue }
+                let before = smc.readUInt32(key)
+                let written = ChargeControl.write(smc, key: key, inhibit: true)
+                let raw = meta.type == "ui32" ? smc.writeUInt32(key, 1) : smc.writeUInt8(key, 1)
+                let during = smc.readUInt32(key)
+                let released = ChargeControl.write(smc, key: key, inhibit: false)
+                let after = smc.readUInt32(key)
+                print("\(key) type=\(meta.type) size=\(meta.size) writable=\(meta.writable) before=\(before ?? 0) inhibit=\(written) raw=\(raw.map(String.init) ?? "nil") during=\(during ?? 0) release=\(released) after=\(after ?? 0)")
+            }
+            exit(0)
+        }
+
+        if CommandLine.arguments.contains("--smc") {
+            guard let smc = SMC() else { print("smc unavailable"); exit(1) }
+            for key in ["CHTE", "CH0B", "CHWA", "CHIE", "CHIB", "CHIC", "ACEN", "BCLM", "B0AC", "BUIC"] {
+                guard let meta = smc.meta(key) else { print("\(key) missing"); continue }
+                let value = meta.type == "ui8" ? smc.readUInt8(key).map { String($0) } : nil
+                print("\(key) type=\(meta.type) size=\(meta.size) writable=\(meta.writable) value=\(value ?? "—")")
+            }
+            exit(0)
+        }
+
+        if CommandLine.arguments.contains("--speedtest") {
+            Task.detached {
+                let result = await Network.speedTest()
+                print("speedtest:", result.map { String(format: "↓%.1f ↑%.1f Mbps", $0.down, $0.up) } ?? "failed")
+                exit(0)
+            }
+            dispatchMain()
+        }
+
         if CommandLine.arguments.contains("--shelltest") {
             // 200 KB output: a pipe-buffer deadlock here would hang forever.
             let data = Shell.run("/bin/sh", ["-c", "head -c 200000 /dev/zero | tr '\\0' x"])

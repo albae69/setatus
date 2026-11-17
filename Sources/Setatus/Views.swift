@@ -88,7 +88,7 @@ struct PanelView: View {
                     windowColumn("Month", usage.monthly)
                 }
                 if let today = model.today {
-                    Text("Today  \(today.requests) req · \(compact(today.promptTokens + today.completionTokens)) tok · $\(String(format: "%.2f", today.cost))")
+                    Text("Today  " + String(today.requests) + " req · " + compact(today.promptTokens + today.completionTokens) + " tok · $" + String(format: "%.2f", today.cost))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
@@ -146,8 +146,40 @@ struct PanelView: View {
                      ratio: model.ramPercent / 100)
             }
             infoRow("Power", powerText)
+            chargeLimitRow
             infoRow("Uptime", uptimeText)
         }
+    }
+
+    private var chargeLimitRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                label("Charge limit")
+                Spacer()
+                Text(model.chargeLimit >= 100 ? "off" : "\(model.chargeLimit)%")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: Binding(get: { Double(model.chargeLimit) },
+                                  set: { model.chargeLimit = Int($0) }),
+                   in: 50...100, step: 5) { editing in
+                if !editing { Task { await model.applyChargeLimit(model.chargeLimit) } }
+            }
+            .tint(model.chargeState?.inhibited == true ? .orange : .accentColor)
+            .disabled(model.chargeState?.supported == false)
+            if let message = chargeMessage {
+                Text(message).font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var chargeMessage: String? {
+        if let error = model.chargeMessage { return error }
+        guard let state = model.chargeState else { return nil }
+        if !state.supported { return "Charge limit not exposed by this Mac's SMC" }
+        guard state.limit > 0, state.limit < 100 else { return nil }
+        let percent = Int(state.percent ?? 0)
+        return state.inhibited ? "charging paused at \(percent)%" : "holding \(state.limit)%"
     }
 
     private func tile(_ title: String, value: String, detail: String?, ratio: Double) -> some View {
@@ -238,11 +270,11 @@ struct PanelView: View {
                 }
                 .tint(model.fanRunning ? .orange : .accentColor)
                 HStack {
-                    Text("min \(Int(fan.minimum.rounded()))")
+                    Text("min " + String(Int(fan.minimum.rounded())))
                     Spacer()
-                    Text("target \(Int(fan.target.rounded()))")
+                    Text("target " + String(Int(fan.target.rounded())))
                     Spacer()
-                    Text("max \(Int(fan.maximum.rounded()))")
+                    Text("max " + String(Int(fan.maximum.rounded())))
                 }
                 .font(.system(size: 9))
                 .monospacedDigit()
@@ -280,6 +312,23 @@ struct PanelView: View {
             }
             .font(.system(size: 9, design: .monospaced))
             .foregroundStyle(.tertiary)
+
+            HStack(spacing: 6) {
+                Button(model.speedTesting ? "Testing…" : "Speed test") {
+                    Task { await model.runSpeedTest() }
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 9))
+                .disabled(model.speedTesting)
+                Spacer(minLength: 4)
+                if let speed = model.speedTest {
+                    Text("↓ \(String(format: "%.1f", speed.down)) · ↑ \(String(format: "%.1f", speed.up)) Mbps")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                } else if let error = model.speedTestError {
+                    Text(error).font(.system(size: 9)).foregroundStyle(.red)
+                }
+            }
         }
         .card()
     }
@@ -302,8 +351,8 @@ struct PanelView: View {
                 label("Activity")
                 Spacer()
                 Picker("Activity", selection: $activity) {
-                    Text("Ports \(model.ports.count)").tag(Activity.ports)
-                    Text("Processes \(model.processes.count)").tag(Activity.processes)
+                    Text("Ports " + String(model.ports.count)).tag(Activity.ports)
+                    Text("Processes " + String(model.processes.count)).tag(Activity.processes)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -322,6 +371,18 @@ struct PanelView: View {
         .card()
     }
 
+    private func killButton(help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .frame(width: 10)
+        }
+        .buttonStyle(.borderless)
+        .font(.system(size: 9))
+        .foregroundStyle(.red)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+
     private var portList: some View {
         VStack(alignment: .leading, spacing: 0) {
             if model.ports.isEmpty {
@@ -331,37 +392,29 @@ struct PanelView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(model.ports) { row in
-                            HStack(spacing: 8) {
-                                Text(row.process).font(.system(size: 11, weight: .medium))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Text(":\(row.port) · \(row.pid)").font(.system(size: 9, design: .monospaced))
-                                    .foregroundStyle(.tertiary)
-                                Spacer(minLength: 4)
+                            HStack(spacing: 6) {
                                 if confirmPort == row.id {
-                                    Text("SIGTERM?").font(.system(size: 9)).foregroundStyle(.secondary)
-                                    Button("Kill") {
+                                    Button("SIGTERM") {
                                         confirmPort = nil
                                         Task { await model.killPort(row) }
                                     }
                                     .buttonStyle(.borderless)
-                                    .font(.system(size: 10))
+                                    .font(.system(size: 9, weight: .medium))
                                     .foregroundStyle(.red)
                                     Button("Cancel") { confirmPort = nil }
                                         .buttonStyle(.borderless)
-                                        .font(.system(size: 10))
+                                        .font(.system(size: 9))
                                 } else {
-                                    Button {
-                                        confirmPort = row.id
-                                    } label: {
-                                        Image(systemName: "xmark")
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.quaternary)
-                                    .help("Kill \(row.process) on port \(row.port)")
-                                    .accessibilityLabel("Kill \(row.process) on port \(row.port)")
+                                    killButton(
+                                        help: "Kill \(row.process) on port \(row.port)"
+                                    ) { confirmPort = row.id }
                                 }
+                                Text(row.process).font(.system(size: 11, weight: .medium))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text(":" + String(row.port) + " · " + String(row.pid)).font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                                Spacer(minLength: 0)
                             }
                             .frame(height: 30)
                         }
@@ -380,40 +433,30 @@ struct PanelView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(model.processes) { row in
-                        HStack(spacing: 8) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(row.name).font(.system(size: 11, weight: .medium))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Text("\(row.pid) · \(String(format: "%.1f%%", row.cpu)) · \(String(format: "%.0f MB", row.memoryMB))")
-                                    .font(.system(size: 9, design: .monospaced))
-                                    .foregroundStyle(.tertiary)
-                            }
-                            Spacer(minLength: 4)
+                        HStack(spacing: 6) {
                             if confirmPID == row.pid {
-                                Text("SIGTERM?").font(.system(size: 9)).foregroundStyle(.secondary)
-                                Button("Kill") {
+                                Button("SIGTERM") {
                                     confirmPID = nil
                                     Task { await model.kill(row) }
                                 }
                                 .buttonStyle(.borderless)
-                                .font(.system(size: 10))
+                                .font(.system(size: 9, weight: .medium))
                                 .foregroundStyle(.red)
                                 Button("Cancel") { confirmPID = nil }
                                     .buttonStyle(.borderless)
-                                    .font(.system(size: 10))
+                                    .font(.system(size: 9))
                             } else {
-                                Button {
-                                    confirmPID = row.pid
-                                } label: {
-                                    Image(systemName: "xmark")
-                                }
-                                .buttonStyle(.borderless)
-                                .font(.system(size: 9))
-                                .foregroundStyle(.quaternary)
-                                .help("Kill \(row.name)")
-                                .accessibilityLabel("Kill \(row.name)")
+                                killButton(help: "Kill \(row.name)") { confirmPID = row.pid }
                             }
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(row.name).font(.system(size: 11, weight: .medium))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text(String(row.pid) + " · " + String(format: "%.1f%%", row.cpu) + " · " + String(format: "%.0f MB", row.memoryMB))
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Spacer(minLength: 0)
                         }
                         .frame(height: 30)
                     }

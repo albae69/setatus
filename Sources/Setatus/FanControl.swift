@@ -88,11 +88,28 @@ enum FanControl {
         launchctl enable system/\(daemonLabel)
         launchctl kickstart -k system/\(daemonLabel)
         """
-        return runAdmin(script)
+        return runAdmin(script) && installed
+    }
+
+    /// Removes the helper, login item, config and the app itself in one admin prompt.
+    static func uninstall(home: String = NSHomeDirectory()) -> Bool {
+        let app = Bundle.main.bundlePath
+        // Never delete a copy running out of a build directory.
+        guard app.hasPrefix("/Applications/") else { return false }
+        let script = """
+        launchctl bootout system/\(daemonLabel) 2>/dev/null || true
+        for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -f -- --fan-daemon >/dev/null || break; sleep 0.5; done
+        rm -f \(quoted(plistPath))
+        rm -f \(quoted(helperPath))
+        rm -f \(quoted(LaunchAtLogin.plistURL.path))
+        rm -rf \(quoted(requestURL(home: home).deletingLastPathComponent().path))
+        rm -rf \(quoted(app))
+        """
+        return runAdmin(script) && !FileManager.default.fileExists(atPath: app)
     }
 
     /// Runs a shell script as root through one authorization prompt; blocks until it finishes.
-    private static func runAdmin(_ script: String) -> Bool {
+    static func runAdmin(_ script: String) -> Bool {
         let escaped = script
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -109,11 +126,11 @@ enum FanControl {
         process.standardOutput = logHandle ?? FileHandle.nullDevice
         do { try process.run() } catch { return false }
         process.waitUntilExit()
-        return process.terminationStatus == 0 && installed
+        return process.terminationStatus == 0
     }
 
     /// Single-quote for the admin shell script; paths may contain quotes or spaces.
-    private static func quoted(_ value: String) -> String {
+    static func quoted(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
@@ -138,6 +155,8 @@ enum FanControl {
         }
 
         let url = requestURL(home: home)
+        let chargeURL = ChargeControl.requestURL(home: home)
+        let chargeStateURL = ChargeControl.stateURL(home: home)
         let expectedDirectory = URL(fileURLWithPath: home)
             .appendingPathComponent(".config/setatus")
             .resolvingSymlinksInPath()
@@ -145,12 +164,64 @@ enum FanControl {
         var hardwareEngaged = false
         var announcedRPM = -1
         var lastModeCheck = Date.distantPast
+        var chargeKey: String?
+        var chargeInhibited = false
+        var chargeReset = false
+        var lastChargeWrite = Date.distantPast
+        var lastChargeState: ChargeState?
 
         while true {
             if stopping.withLock({ $0 }) {
                 log("exit: signal", home: home)
                 restore(smc)
+                releaseCharge(smc, key: chargeKey, inhibited: &chargeInhibited, home: home)
                 exit(0)
+            }
+
+            if chargeKey == nil {
+                chargeKey = ChargeControl.keyName { smc.meta($0) != nil }
+            }
+            // A previous run (or another app) may have left charging inhibited; start clean
+            // so the limit logic below owns the key from a known state.
+            if let key = chargeKey, !chargeReset {
+                ChargeControl.write(smc, key: key, inhibit: false)
+                chargeReset = true
+            }
+            if let key = chargeKey, chargeReset {
+                chargeInhibited = ChargeControl.isInhibited(smc, key: key)
+            }
+            let chargeRequest = currentCharge(chargeURL, directory: expectedDirectory)
+            let chargeLimit = chargeRequest?.limit ?? 0
+            let percent = Power.batteryPercent()
+            if let key = chargeKey, chargeLimit > 0, chargeLimit < 100 {
+                switch ChargeControl.action(limit: chargeLimit, percent: percent ?? 0, inhibited: chargeInhibited) {
+                case .inhibit:
+                    if ChargeControl.write(smc, key: key, inhibit: true) {
+                        chargeInhibited = true
+                        log("charge: inhibit at \(Int(percent ?? 0))% limit=\(chargeLimit) key=\(key)", home: home)
+                    }
+                case .resume:
+                    if ChargeControl.write(smc, key: key, inhibit: false) {
+                        chargeInhibited = false
+                        log("charge: resume at \(Int(percent ?? 0))%", home: home)
+                    }
+                case .none:
+                    break
+                }
+            } else {
+                releaseCharge(smc, key: chargeKey, inhibited: &chargeInhibited, home: home)
+            }
+            let state = ChargeState(supported: chargeKey != nil, inhibited: chargeInhibited,
+                                    limit: chargeLimit, percent: percent,
+                                    at: Date().timeIntervalSince1970)
+            let changed = lastChargeState.map {
+                $0.supported != state.supported || $0.inhibited != state.inhibited
+                    || $0.limit != state.limit
+            } ?? true
+            if changed || Date().timeIntervalSince(lastChargeWrite) > 5 {
+                writeChargeState(chargeStateURL, state)
+                lastChargeWrite = Date()
+                lastChargeState = state
             }
 
             guard let request = currentRequest(smc, url: url, directory: expectedDirectory) else {
@@ -199,8 +270,31 @@ enum FanControl {
                 }
             }
 
-            usleep(1_000_000)
         }
+    }
+
+    private static func currentCharge(_ url: URL, directory: URL) -> ChargeRequest? {
+        let now = Date().timeIntervalSince1970
+        guard let data = safeContents(url, directory: directory),
+              let request = try? JSONDecoder().decode(ChargeRequest.self, from: data),
+              now - request.updated < staleAfter else { return nil }
+        return request
+    }
+
+    private static func releaseCharge(_ smc: SMC, key: String?, inhibited: inout Bool, home: String) {
+        guard let key, ChargeControl.isInhibited(smc, key: key) else {
+            inhibited = false
+            return
+        }
+        if ChargeControl.write(smc, key: key, inhibit: false) {
+            inhibited = false
+            log("charge: released", home: home)
+        }
+    }
+
+    private static func writeChargeState(_ url: URL, _ state: ChargeState) {
+        guard let data = try? JSONEncoder().encode(state) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 
     /// The current request, only when fresh and pointing at a fan this Mac has.

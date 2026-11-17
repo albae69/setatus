@@ -54,6 +54,42 @@ enum Network {
         return fallback
     }
 
+    /// Down/up in Mbps from Cloudflare's public speed endpoint. fast.com has no
+    /// unauthenticated API (its token is fetched by the site's JS), so this uses the
+    /// endpoint behind speed.cloudflare.com instead.
+    static func speedTest() async -> (down: Double, up: Double)? {
+        let config = URLSessionConfiguration.ephemeral
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.timeoutIntervalForRequest = 25
+        let session = URLSession(configuration: config)
+
+        func Mbps(_ bytes: Int, _ seconds: TimeInterval) -> Double {
+            seconds > 0 ? Double(bytes) * 8 / seconds / 1_000_000 : 0
+        }
+
+        func download(_ bytes: Int) async -> (bytes: Int, seconds: TimeInterval)? {
+            guard let url = URL(string: "https://speed.cloudflare.com/__down?bytes=\(bytes)") else { return nil }
+            let start = Date()
+            guard let (data, _) = try? await session.data(from: url) else { return nil }
+            return (data.count, Date().timeIntervalSince(start))
+        }
+
+        // 8 MB first; a slow link falls back to 2 MB so the request still finishes.
+        var measured = await download(8_000_000)
+        if measured == nil || measured!.seconds > 20 {
+            measured = await download(2_000_000)
+        }
+        guard let down = measured else { return nil }
+
+        guard let url = URL(string: "https://speed.cloudflare.com/__up") else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let body = Data(count: 4_000_000)
+        let start = Date()
+        guard let (_, _) = try? await session.upload(for: request, from: body) else { return (Mbps(down.bytes, down.seconds), 0) }
+        return (Mbps(down.bytes, down.seconds), Mbps(body.count, Date().timeIntervalSince(start)))
+    }
+
     static func totals() -> (in: UInt64, out: UInt64) {
         var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
         // The table can grow between the size probe and the fill; retry instead of

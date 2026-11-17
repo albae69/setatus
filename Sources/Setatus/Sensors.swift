@@ -96,6 +96,12 @@ final class SMC {
         write(key, bytes: [value])
     }
 
+    /// Little-endian 32-bit write, the width CHTE uses on Apple Silicon.
+    func writeUInt32(_ key: String, _ value: UInt32) -> UInt8? {
+        let bits = value.littleEndian
+        return write(key, bytes: withUnsafeBytes(of: bits) { Array($0) })
+    }
+
     func writeFloat(_ key: String, _ value: Float) -> UInt8? {
         let bits = value.bitPattern.littleEndian
         let bytes = withUnsafeBytes(of: bits) { Array($0) }
@@ -160,6 +166,19 @@ final class SMC {
         }
     }
 
+    var keyCount: UInt32 { readUInt32("#KEY") ?? 0 }
+
+    /// Every four-character key the SMC advertises, for diagnostics and charge-key lookup.
+    func keyNames() -> [String] {        guard let count = readUInt32("#KEY"), count > 0 else { return [] }
+        return (0..<min(count, 2000)).compactMap { index in
+            var input = SMCKeyData()
+            input.data8 = UInt8(Selector.keyFromIndex.rawValue)
+            input.data32 = UInt32(index)
+            guard let key = kernelCall(&input)?.key else { return nil }
+            return Self.fourCC(key)
+        }
+    }
+
     func readFloat(_ key: String) -> Double? {
         guard let out = readRaw(key) else { return nil }
         let b = withUnsafeBytes(of: out.bytes) { Array($0) }
@@ -182,7 +201,12 @@ final class SMC {
         return out
     }
 
-    private func readUInt32(_ key: String) -> UInt32? {
+    func readBytes(_ key: String) -> [UInt8]? {
+        guard let out = readRaw(key) else { return nil }
+        return withUnsafeBytes(of: out.bytes) { Array($0) }
+    }
+
+    func readUInt32(_ key: String) -> UInt32? {
         guard let out = readRaw(key) else { return nil }
         let b = withUnsafeBytes(of: out.bytes) { Array($0) }
         guard b.count >= 4 else { return nil }

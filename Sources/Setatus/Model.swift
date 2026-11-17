@@ -66,6 +66,12 @@ final class Model: ObservableObject {
     @Published var netTotalIn: UInt64 = 0
     @Published var netTotalOut: UInt64 = 0
     @Published var localIP: String?
+    @Published var speedTest: (down: Double, up: Double)?
+    @Published var speedTesting = false
+    @Published var speedTestError: String?
+    @Published var chargeLimit: Int = 100
+    @Published var chargeState: ChargeState?
+    @Published var chargeMessage: String?
     @Published var gpuUsage: Double?
     @Published var power: PowerSnapshot?
     @Published private(set) var metrics: Set<MenuMetric> = Set(MenuMetric.defaults)
@@ -80,6 +86,7 @@ final class Model: ObservableObject {
     @Published var updatedAt: Date?
 
     private static let detailKey = "menuDetails"
+    private static let chargeKey = "chargeLimit"
 
     private var metricsTimer: Timer?
     private var tickPending = false
@@ -102,6 +109,9 @@ final class Model: ObservableObject {
                   let detail = MetricDetail(rawValue: pair.value) else { return }
             result[metric] = detail
         }
+
+        let storedLimit = UserDefaults.standard.object(forKey: Self.chargeKey) as? Int
+        chargeLimit = storedLimit.map { min(100, max(50, $0)) } ?? 100
     }
 
     var ramPercent: Double {
@@ -175,6 +185,10 @@ final class Model: ObservableObject {
         guard !started else { return }
         started = true
         Task { await tickMetrics() }
+        // Re-arm a saved limit without a prompt; installing the helper stays a user action.
+        if chargeLimit < 100, FanControl.installed, FanControl.helperRunning() {
+            ChargeControl.send(limit: chargeLimit)
+        }
         metricsTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.tickMetrics() }
         }
@@ -209,6 +223,12 @@ final class Model: ObservableObject {
         netTotalIn = snapshot.totalIn
         netTotalOut = snapshot.totalOut
         localIP = snapshot.localIP
+        chargeState = await Task.detached { ChargeControl.state() }.value
+        // The helper treats requests older than 30 s as abandoned, so a live limit has to
+        // be re-sent while the slider is below 100.
+        if chargeLimit < 100 {
+            ChargeControl.send(limit: chargeLimit)
+        }
 
         if !fanInitialized, let fan = fans.first {
             fanTarget = fan.target > 0 ? fan.target : max(fan.actual, fan.minimum)
@@ -303,8 +323,37 @@ final class Model: ObservableObject {
         refreshProcesses()
     }
 
-    func refreshPorts() {
-        guard !portPending else { return }
+    /// 100 means no limit. Below that the root helper holds the battery at the set percent.
+    func applyChargeLimit(_ limit: Int) async {
+        chargeLimit = min(100, max(50, limit))
+        UserDefaults.standard.set(chargeLimit, forKey: Self.chargeKey)
+        chargeMessage = nil
+
+        // Always make sure the helper is current: an older build ignores charge.json, so a
+        // limit it set earlier would never be released by turning the slider off.
+        if !FanControl.installed || !FanControl.helperRunning() {
+            let installed = await Task.detached { FanControl.install() }.value
+            guard installed else {
+                chargeMessage = "charge helper install cancelled"
+                return
+            }
+        }
+        ChargeControl.send(limit: chargeLimit)
+    }
+
+    func runSpeedTest() async {        guard !speedTesting else { return }
+        speedTesting = true
+        speedTestError = nil
+        defer { speedTesting = false }
+
+        guard let result = await Network.speedTest() else {
+            speedTestError = "speed test failed"
+            return
+        }
+        speedTest = result
+    }
+
+    func refreshPorts() {        guard !portPending else { return }
         portPending = true
         let work = Task.detached { Ports.scan() }
         Task { [weak self] in

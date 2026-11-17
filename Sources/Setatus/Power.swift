@@ -33,8 +33,19 @@ enum Power {
         return snapshot
     }
 
-    private static func number(after marker: String, in text: String) -> Double? {
-        guard let range = text.range(of: marker) else { return nil }
+    /// Battery percent only, for the root helper's once-a-second charge check.
+    static func batteryPercent() -> Double? {
+        guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let list = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef],
+              let first = list.first,
+              let description = IOPSGetPowerSourceDescription(blob, first)?.takeUnretainedValue() as? [String: Any],
+              let current = description[kIOPSCurrentCapacityKey] as? Double,
+              let maximum = description[kIOPSMaxCapacityKey] as? Double,
+              maximum > 0 else { return nil }
+        return current / maximum * 100
+    }
+
+    private static func number(after marker: String, in text: String) -> Double? {        guard let range = text.range(of: marker) else { return nil }
         let digits = text[range.upperBound...].prefix { $0.isNumber || $0 == "." }
         return Double(digits)
     }

@@ -5,7 +5,7 @@ import Foundation
 enum LaunchAtLogin {
     private static let label = "dev.bae.setatus"
 
-    private static var plistURL: URL {
+    static var plistURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents/\(label).plist")
     }

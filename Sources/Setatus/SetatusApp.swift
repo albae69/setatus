@@ -8,7 +8,9 @@ struct SetatusApp {
            index + 1 < CommandLine.arguments.count {
             FanControl.hold(home: CommandLine.arguments[index + 1])
         }
-        if CommandLine.arguments.contains("--selfcheck") {
+        if CommandLine.arguments.contains("--selfcheck") || CommandLine.arguments.contains("--speedtest")
+            || CommandLine.arguments.contains("--smc") || CommandLine.arguments.contains("--charge")
+            || CommandLine.arguments.contains("--charge-write") {
             SelfCheck.run()
         }
         if let other = duplicateInstance() {
@@ -38,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var titleTimer: Timer?
+    private var uninstalling = false
     private lazy var menu = buildMenu()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -70,7 +73,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        model.restoreFan()
+        // Restoring writes fan.json, which would recreate the config we just deleted.
+        if !uninstalling { model.restoreFan() }
     }
 
     private func updateTitle() {
@@ -119,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Launch at Login", #selector(toggleLogin)))
         menu.addItem(.separator())
         menu.addItem(item("About Setatus", #selector(showAbout)))
+        menu.addItem(item("Uninstall Setatus…", #selector(uninstall)))
         menu.addItem(item("Quit Setatus", #selector(quit), "q"))
         return menu
     }
@@ -221,6 +226,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.terminate(nil)
     }
 
+    @objc private func uninstall() {
+        let confirm = NSAlert()
+        confirm.messageText = "Uninstall Setatus?"
+        confirm.informativeText = "Stops the fan helper, removes its login item and config, then deletes \(Bundle.main.bundlePath). This cannot be undone."
+        confirm.addButton(withTitle: "Uninstall")
+        confirm.addButton(withTitle: "Cancel")
+        confirm.alertStyle = .warning
+        NSApp.activate(ignoringOtherApps: true)
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+
+        // Hand the fans back to firmware now, so nothing rewrites fan.json while the
+        // admin script is deleting it.
+        titleTimer?.invalidate()
+        model.restoreFan()
+
+        Task { @MainActor in
+            let removed = await Task.detached { FanControl.uninstall() }.value
+            uninstalling = removed
+
+            let done = NSAlert()
+            done.messageText = removed ? "Setatus uninstalled" : "Uninstall failed"
+            done.informativeText = removed
+                ? "\(Bundle.main.bundlePath) and its helper are gone."
+                : "Nothing was removed. Run Setatus from /Applications and try again; details in ~/.config/setatus/install.log."
+            done.alertStyle = removed ? .informational : .warning
+            done.runModal()
+
+            guard removed else { return }
+            UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier ?? "dev.bae.setatus")
+            NSApp.terminate(nil)
+        }
+    }
+
     @objc private func showAbout() {
         let credits = NSAttributedString(
             string: "Dibuat oleh bae",
@@ -228,7 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .font: NSFont.systemFont(ofSize: 11),
                 .foregroundColor: NSColor.secondaryLabelColor,
             ])
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.3"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0"
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Setatus",
             .applicationVersion: version,
