@@ -41,6 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let popover = NSPopover()
     private var titleTimer: Timer?
     private var uninstalling = false
+    private var iconOnly = false
+    private var lastRestoreAttempt = Date.distantPast
+    private var titleOverhead: CGFloat = 0
     private lazy var menu = buildMenu()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -51,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.target = self
             button.action = #selector(statusClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            button.font = .monospacedSystemFont(ofSize: 9, weight: .medium)
+            button.font = Self.menuFont
         }
         updateTitle()
 
@@ -78,7 +81,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateTitle() {
-        statusItem?.button?.title = model.menuTitle
+        guard let button = statusItem?.button else { return }
+        let title = model.menuTitle
+
+        if iconOnly {
+            button.toolTip = title
+            guard Date().timeIntervalSince(lastRestoreAttempt) > 20,
+                  fits(title, in: button) else { return }
+            lastRestoreAttempt = Date()
+            iconOnly = false
+        }
+
+        button.image = nil
+        button.title = title
+        button.toolTip = title
+
+        // macOS hides status items that spill off-screen or under the notch; fall
+        // back to an icon before the item disappears. There is no public visibility API.
+        if isHidden(button) {
+            iconOnly = true
+            lastRestoreAttempt = Date()
+            applyIcon(button)
+            return
+        }
+
+        let textWidth = (title as NSString).size(withAttributes: [.font: button.font ?? Self.menuFont]).width
+        let itemWidth = button.window?.frame.width ?? 0
+        if textWidth > 0, itemWidth > textWidth {
+            titleOverhead = itemWidth - textWidth
+        }
+    }
+
+    private static let menuFont = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+
+    private func applyIcon(_ button: NSStatusBarButton) {
+        if let icon = NSApp.applicationIconImage?.copy() as? NSImage {
+            icon.size = NSSize(width: 18, height: 18)
+            button.title = ""
+            button.image = icon
+        } else {
+            button.image = nil
+            button.title = "S"
+        }
+        button.toolTip = model.menuTitle
+    }
+
+    private func isHidden(_ button: NSStatusBarButton) -> Bool {
+        guard let window = button.window, let screen = window.screen ?? NSScreen.main else { return false }
+        // Status item windows start unplaced (below the screen) until the menu bar lays them out.
+        guard window.frame.minY >= screen.frame.midY else { return false }
+        if #available(macOS 12.0, *), let right = screen.auxiliaryTopRightArea {
+            // Nothing renders left of the notch: the system clips it away.
+            return window.frame.minX < right.minX
+        }
+        return window.frame.minX < screen.frame.minX
+    }
+
+    private func fits(_ title: String, in button: NSStatusBarButton) -> Bool {
+        guard let window = button.window, let screen = window.screen ?? NSScreen.main else { return false }
+        var minX = screen.frame.minX
+        if #available(macOS 12.0, *), let right = screen.auxiliaryTopRightArea {
+            guard window.frame.maxX > right.minX else { return false }
+            minX = right.minX
+        }
+        let width = (title as NSString).size(withAttributes: [.font: button.font ?? Self.menuFont]).width
+        return width + titleOverhead <= window.frame.maxX - minX
     }
 
     @objc private func statusClicked() {
@@ -266,7 +333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .font: NSFont.systemFont(ofSize: 11),
                 .foregroundColor: NSColor.secondaryLabelColor,
             ])
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.0"
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Setatus",
             .applicationVersion: version,
