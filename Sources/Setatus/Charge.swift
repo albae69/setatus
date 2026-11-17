@@ -48,10 +48,12 @@ enum ChargeControl {
 
     /// Reads the key at its own width; firmware can reset it behind our back, so the
     /// daemon treats this as the source of truth rather than its last write.
+    /// Any non-zero value means inhibited: CHTE reads back the 0x01000000 written for 1,
+    /// so an equality check would miss the inhibit and never release it.
     static func isInhibited(_ smc: SMC, key: String) -> Bool {
         smc.meta(key)?.type == "ui32"
-            ? smc.readUInt32(key) == 1
-            : smc.readUInt8(key) == 1
+            ? smc.readUInt32(key).map { $0 != 0 } ?? false
+            : smc.readUInt8(key).map { $0 != 0 } ?? false
     }
 
     /// Writes the key at its own width. 0x87 (size mismatch) still means the value
