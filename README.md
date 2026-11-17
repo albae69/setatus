@@ -8,7 +8,7 @@
 [![Swift](https://img.shields.io/badge/swift-5.9-orange?logo=swift)](#requirements)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)](#requirements)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue)](CHANGELOG.md)
 [![Status](https://img.shields.io/badge/status-personal%20project-blue)](https://github.com/albae69/setatus)
 [![GitHub stars](https://img.shields.io/github/stars/albae69/setatus?style=social)](https://github.com/albae69/setatus)
 
@@ -74,6 +74,10 @@ Click the status item for details. Right-click it for actions.
 Every field is padded to a fixed width and rendered with a monospaced font, so the status
 item does not shift while values change. Fields can be enabled or disabled individually
 from the right-click menu; the power input metric is off by default.
+
+When the menu bar runs out of room (notch or too many items), the item collapses to the
+app icon (plain `S` if the bundle has no icon) instead of disappearing. The full title is
+still available as a tooltip, and clicking the icon opens the popover as usual.
 
 ### Popover
 

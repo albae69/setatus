@@ -5,7 +5,16 @@ All notable changes to Setatus are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-18
+
+### Fixed
+
+- The menu bar item collapses to the app icon (plain `S` when no icon is bundled) when its
+  title would spill under the notch or off-screen, instead of silently disappearing. The
+  full title stays in the tooltip, and the icon opens the same popover.
+- Charge limit no longer leaves charging inhibited below the resume point: `CHTE` reads
+  back `0x01000000` for `1`, so the helper now treats any non-zero value as inhibited
+  and can release the key instead of re-writing it every second.
 
 ## [0.2.0] - 2026-11-17
 
@@ -77,7 +86,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Popover with OpenCode limit windows, system tiles, fan control, and internet stats.
 - Privileged fan helper, Launch at Login, and `--selfcheck` / `--killtest` checks.
 
-[Unreleased]: https://github.com/albae69/setatus/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/albae69/setatus/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/albae69/setatus/releases/tag/v0.3.0
 [0.2.0]: https://github.com/albae69/setatus/releases/tag/v0.2.0
 [0.1.3]: https://github.com/albae69/setatus/releases/tag/v0.1.3
 [0.1.2]: https://github.com/albae69/setatus/releases/tag/v0.1.2
