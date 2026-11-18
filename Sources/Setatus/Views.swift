@@ -142,8 +142,6 @@ private struct BlockSlider: View {
 
 struct PanelView: View {
     @EnvironmentObject private var model: Model
-    @State private var keyText = ""
-    @State private var editingKey = false
     @State private var confirmPID: Int32?
     @State private var confirmPort: String?
     @State private var activity: Activity = .ports
@@ -159,14 +157,12 @@ struct PanelView: View {
             charge
             network
             activitySection
-            keySection
         }
         .padding(12)
         .frame(width: 356)
         .background(Rectangle().fill(Bru.cream))
         .onAppear {
             model.refreshPorts()
-            Task { keyText = await Task.detached { UsageService.apiKey() }.value ?? "" }
         }
     }
 
@@ -652,38 +648,6 @@ struct PanelView: View {
             .frame(height: 72)
             if let error = model.killError {
                 Text(error).font(.system(size: 9)).foregroundStyle(Bru.red)
-            }
-        }
-    }
-
-    // MARK: - API key
-
-    private var keySection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                slabButton(editingKey ? "HIDE API KEY" : "SET API KEY",
-                           fill: Bru.yellow, text: Bru.cardInk, shadow: 3) {
-                    editingKey.toggle()
-                }
-                Spacer()
-            }
-            if editingKey {
-                HStack(spacing: 6) {
-                    SecureField("oc_sk_…", text: $keyText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Bru.ink)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(Rectangle().fill(Bru.paper))
-                        .overlay(Rectangle().stroke(Bru.ink, lineWidth: 2))
-                    slabButton("SAVE", fill: Bru.ink, text: Bru.onInk, shadow: 3) {
-                        UserDefaults.standard.set(keyText.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                  forKey: UsageService.keyOverrideDefaultsKey)
-                        editingKey = false
-                        Task { await model.refreshUsage() }
-                    }
-                }
             }
         }
     }

@@ -166,7 +166,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // One-point rect: a full-bounds anchor lets AppKit re-anchor to the button's far
+            // edge when the popover resizes, which lands it near the screen centre.
+            popover.show(relativeTo: NSRect(x: button.bounds.midX, y: button.bounds.minY, width: 1, height: 1),
+                         of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }
     }
@@ -178,6 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
 
         menu.addItem(item("Refresh", #selector(refreshAll), "r"))
+        menu.addItem(item("Set API Key…", #selector(setAPIKey)))
         menu.addItem(.separator())
 
         let metricsItem = NSMenuItem(title: "Menu Bar", action: nil, keyEquivalent: "")
@@ -266,6 +270,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task { await model.refreshUsage() }
     }
 
+    @objc private func setAPIKey() {
+        let alert = NSAlert()
+        alert.messageText = "Set API key"
+        alert.informativeText = "Used for the OpenCode usage limits. Empty falls back to 9router's key."
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.placeholderString = "oc_sk_…"
+        field.stringValue = UserDefaults.standard.string(forKey: UsageService.keyOverrideDefaultsKey) ?? ""
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        UserDefaults.standard.set(field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
+                                  forKey: UsageService.keyOverrideDefaultsKey)
+        Task { await model.refreshUsage() }
+    }
+
     @objc private func resetMetrics() {
         model.resetMenuMetrics()
         updateTitle()
@@ -336,7 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .font: NSFont.systemFont(ofSize: 11),
                 .foregroundColor: NSColor.secondaryLabelColor,
             ])
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.4.0"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.4.1"
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Setatus",
             .applicationVersion: version,
