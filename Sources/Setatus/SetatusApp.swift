@@ -59,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateTitle()
 
         let hosting = NSHostingController(rootView: PanelView().environmentObject(model))
+        hosting.sizingOptions = [.preferredContentSize]
         hosting.view.layoutSubtreeIfNeeded()
         popover.contentViewController = hosting
         popover.behavior = .transient
@@ -82,6 +83,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func updateTitle() {
         guard let button = statusItem?.button else { return }
+        // Resizing the status item while its popover is open dismisses the popover.
+        guard !popover.isShown else { return }
         let title = model.menuTitle
 
         if iconOnly {
@@ -333,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .font: NSFont.systemFont(ofSize: 11),
                 .foregroundColor: NSColor.secondaryLabelColor,
             ])
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.0"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.4.0"
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Setatus",
             .applicationVersion: version,

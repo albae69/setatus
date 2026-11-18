@@ -8,7 +8,7 @@
 [![Swift](https://img.shields.io/badge/swift-5.9-orange?logo=swift)](#requirements)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)](#requirements)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue)](CHANGELOG.md)
 [![Status](https://img.shields.io/badge/status-personal%20project-blue)](https://github.com/albae69/setatus)
 [![GitHub stars](https://img.shields.io/github/stars/albae69/setatus?style=social)](https://github.com/albae69/setatus)
 
@@ -81,16 +81,18 @@ still available as a tooltip, and clicking the icon opens the popover as usual.
 
 ### Popover
 
-The panel is 340 pt wide and organised as cards on one surface:
+The panel is 356 pt wide, drawn as flat, hard-edged cards with ink strokes and offset
+shadows on one cream surface, and sized so every card fits on screen without scrolling:
 
 - **OpenCode limits** — the 5-hour window as the hero number with its reset countdown,
   weekly and monthly windows as secondary columns, plus today's request, token, and cost
   totals.
 - **System** — CPU, GPU, and RAM as three tiles with usage, temperature (RAM shows
-  used/total), and a thin meter; power input, charge limit slider (root helper holds the
-  battery at the set percent via SMC), uptime, and extra sensors as info lines.
+  used/total), and a block meter; power input, uptime, and extra sensors as info lines.
 - **Fan** — live RPM, an Auto/Manual pill, a slider clamped to the SMC range, min/target/max
   labels, and an Auto button while manual control is active.
+- **Charge limit** — the target percent as a hero number, a Paused/SMC limit pill, and a
+  slider (root helper holds the battery at the set percent via SMC).
 - **Internet** — download/upload speed side by side, cumulative totals since boot, the
   local IPv4 address, and a **Speed test** button (Cloudflare download/upload, Mbps).
 - **Activity** — one card with a **Ports / Processes** segmented switch. Ports lists every
@@ -158,8 +160,7 @@ warn on first launch — open it from Finder with **Open** if that happens.
 4. To control the fan, drag the slider in the **Fan** card. The first time, Setatus installs
    the root fan helper and asks for an administrator password once; later changes only write
    a request file. Picking **Auto** (or quitting) returns the fan to the system.
-5. To hold the battery at a given charge, drag the **Charge limit** slider in the **System**
-   card. Set it to 100 (or **off**) to resume normal charging.
+5. To hold the battery at a given charge, drag the slider in the **Charge limit** card. Set it to 100 (or **off**) to resume normal charging.
 6. Right-click → **Uninstall Setatus…** stops the helper, removes the login item and config,
    and deletes the app once you confirm.
 
@@ -291,9 +292,6 @@ Sources/Setatus/
   Shell.swift         process runner helper
   SelfCheck.swift     command line checks
 scripts/build-app.sh  app bundle build
-scripts/make-ui.mjs   FigCraft source for the original UI capture
-scripts/make-ui-v2.mjs FigCraft source for the current (v2) UI
-Design/               FigCraft documents and exported previews
 Assets/AppIcon.icns   Finder icon
 Assets/menu-bar.png   Menu bar screenshot
 Assets/popover.png    Popover screenshot

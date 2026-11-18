@@ -5,6 +5,33 @@ All notable changes to Setatus are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-18
+
+### Changed
+
+- Popover restyled as neo-brutalist: flat cards with 3 pt ink strokes and offset shadows,
+  block meters and sliders instead of thin gauges, on a single cream surface with light and
+  dark palettes.
+- Header replaced the wordmark image with a yellow square and a bold `SETATUS` label; the
+  refresh button and last-update time follow the same flat style.
+- **Charge limit** moved out of the System card into its own card, with the target percent
+  as a hero number and a Paused / SMC limit pill.
+- Panel is 356 pt wide (was 340) and auto-sizes from its SwiftUI content via
+  `NSHostingController.sizingOptions` instead of a fixed height.
+- Tightened card spacing and Ports/Processes list heights so the whole panel fits under the
+  menu bar even with the API key field open (~843 pt, 879 pt with the field, 881 pt
+  available), and the popover stays anchored below the status item.
+
+### Fixed
+
+- The menu bar title stops refreshing while the popover is open, so the status item no
+  longer resizes underneath it and closes the panel mid-read.
+
+### Removed
+
+- FigCraft design sources and generator scripts (`Design/`, `scripts/make-ui.mjs`,
+  `scripts/make-ui-v2.mjs`).
+
 ## [0.3.0] - 2026-11-18
 
 ### Fixed
@@ -53,7 +80,6 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Activity card with a **Ports / Processes** switch. Ports lists every process listening
   on a TCP port; Processes lists the top 20 by RAM, both with inline SIGTERM confirmation.
 - Setatus wordmark and Finder app icon.
-- FigCraft sources and refreshed previews for the v2 popover.
 
 ### Changed
 
