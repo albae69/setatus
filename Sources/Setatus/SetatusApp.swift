@@ -357,7 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .font: NSFont.systemFont(ofSize: 11),
                 .foregroundColor: NSColor.secondaryLabelColor,
             ])
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.4.1"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.5.0"
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Setatus",
             .applicationVersion: version,

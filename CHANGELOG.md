@@ -5,6 +5,23 @@ All notable changes to Setatus are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-18
+
+### Added
+
+- OpenCode usage limits fall back to the credential stored by OpenCode itself
+  (`~/.local/share/opencode/opencode.db`) when 9router is not installed, so a direct
+  OpenCode setup no longer needs a manually entered key. Expired OAuth tokens are skipped.
+
+### Changed
+
+- New app icon: a bold S ribbon on the neo-brutalist cream tile, without the offset
+  shadow so it stays centred at Dock and Finder sizes. The vector source is
+  `Assets/icon-app-s-ribbon.vectorcraft`.
+- Today's requests, tokens, and model breakdown come from OpenCode's local session stats,
+  which count 9router and direct traffic once; 9router's `usageDaily` table is only a
+  fallback when its service is not running.
+
 ## [0.4.1] - 2026-11-18
 
 ### Changed
@@ -126,7 +143,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Popover with OpenCode limit windows, system tiles, fan control, and internet stats.
 - Privileged fan helper, Launch at Login, and `--selfcheck` / `--killtest` checks.
 
-[Unreleased]: https://github.com/albae69/setatus/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/albae69/setatus/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/albae69/setatus/releases/tag/v0.5.0
 [0.4.1]: https://github.com/albae69/setatus/releases/tag/v0.4.1
 [0.4.0]: https://github.com/albae69/setatus/releases/tag/v0.4.0
 [0.3.0]: https://github.com/albae69/setatus/releases/tag/v0.3.0

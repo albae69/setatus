@@ -8,7 +8,7 @@
 [![Swift](https://img.shields.io/badge/swift-5.9-orange?logo=swift)](#requirements)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)](#requirements)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.4.1-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue)](CHANGELOG.md)
 [![Status](https://img.shields.io/badge/status-personal%20project-blue)](https://github.com/albae69/setatus)
 [![GitHub stars](https://img.shields.io/github/stars/albae69/setatus?style=social)](https://github.com/albae69/setatus)
 
@@ -170,14 +170,16 @@ warn on first launch — open it from Finder with **Open** if that happens.
 | --- | --- |
 | Menu bar metrics | Right-click → **Menu Bar** (stored in `UserDefaults` under `menuMetrics`) |
 | Launch at login | Right-click → **Launch at Login** (`~/Library/LaunchAgents/dev.bae.setatus.plist`) |
-| OpenCode API key | Automatically read from 9router, or enter one in the popover |
+| OpenCode API key | Automatically read from 9router or OpenCode, or entered manually via **Set API Key…** |
 | Charge limit | Popover slider (stored in `UserDefaults` under `chargeLimit`, 100 means off) |
 | Fan helper | `/Library/LaunchDaemons/dev.bae.setatus.fanhelper.plist` and `/Library/PrivilegedHelperTools/dev.bae.setatus.fanhelper` |
 | Fan and charge requests | `~/.config/setatus/fan.json` and `charge.json`, logs in `~/.config/setatus/helper.log` |
 
 Setatus reads the OpenCode key from `~/.9router/db/data.sqlite`
-(`providerConnections` where `provider = 'opencode-go'`). A manually entered key is stored
-in `UserDefaults`.
+(`providerConnections` where `provider = 'opencode-go'`). Without 9router it falls back to
+the credential OpenCode stores directly in `~/.local/share/opencode/opencode.db`
+(`credential` where `integration_id = 'opencode'`), skipping OAuth tokens that have already
+expired. A manually entered key is stored in `UserDefaults` and takes precedence.
 
 ## How it works
 
@@ -194,12 +196,18 @@ in `UserDefaults`.
 | Charge limit | SMC charging key (`CHTE`, `CH0B`, or `CHWA`) via the root helper |
 | Uptime | `sysctl` `KERN_BOOTTIME` |
 | OpenCode usage | `GET https://opencode.ai/zen/go/v1/usage` |
-| Today's usage | 9router `usageDaily` table |
+| Today's usage | OpenCode local service (`/api/experimental/session/stats`), falling back to 9router `usageDaily` |
 | Speed test | `https://speed.cloudflare.com/__down` and `__up` |
 
 The app uses a single `NSStatusItem` with a custom font and an `NSPopover` for the panel.
 Metrics refresh every 2 seconds, processes every 5 seconds, and OpenCode usage every
 minute.
+
+Today's requests, tokens, and model breakdown come from OpenCode's local service
+(`~/.local/state/opencode/service.json`), which aggregates every session regardless of
+provider, so a mix of 9router and direct OpenCode traffic is counted once. When that service
+is not running, Setatus falls back to 9router's `usageDaily` table. Costs reported by
+OpenCode are used as-is, so they read `$0.00` on a subscription plan.
 
 ## Fan and charge control
 
@@ -293,6 +301,7 @@ Sources/Setatus/
   SelfCheck.swift     command line checks
 scripts/build-app.sh  app bundle build
 Assets/AppIcon.icns   Finder icon
+Assets/icon-app-s-ribbon.vectorcraft  App icon source (VectorCraft)
 Assets/menu-bar.png   Menu bar screenshot
 Assets/popover.png    Popover screenshot
 ```
@@ -318,9 +327,9 @@ pgrep -f -- --fan-daemon
 launchctl print system/dev.bae.setatus.fanhelper | head
 ```
 
-**Usage shows "No opencode-go key found".**
-Make sure 9router has an `opencode-go` connection in
-`~/.9router/db/data.sqlite`, or enter the key manually in the popover.
+**Usage shows "No OpenCode API key found".**
+Add an `opencode-go` connection in 9router (`~/.9router/db/data.sqlite`), sign in to
+OpenCode, or set the key manually via **Set API Key…**.
 
 **The password prompt appears again.**
 Expected on the first manual target, and once after an app update (the helper binary is a
