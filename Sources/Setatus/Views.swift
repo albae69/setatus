@@ -208,17 +208,17 @@ struct PanelView: View {
                             .font(.system(size: 9, weight: .bold, design: .monospaced))
                             .foregroundStyle(Bru.cardInk)
                     }
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(String(format: "%.0f", usage.rolling.percent))
-                            .font(.system(size: 32, weight: .bold, design: .monospaced))
-                            .foregroundStyle(Bru.cardInk)
-                        Text("%").font(.system(size: 20, weight: .bold, design: .monospaced))
-                            .foregroundStyle(Bru.cardInk)
-                        Spacer()
-                        if let today = model.today {
-                            Text(compact(today.promptTokens + today.completionTokens) + " tok · $" + String(format: "%.2f", today.cost))
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    HStack(alignment: .center, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(String(format: "%.0f", usage.rolling.percent))
+                                .font(.system(size: 32, weight: .bold, design: .monospaced))
                                 .foregroundStyle(Bru.cardInk)
+                            Text("%").font(.system(size: 20, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Bru.cardInk)
+                        }
+                        Spacer(minLength: 0)
+                        if let today = model.today {
+                            usageGrid(today)
                         }
                     }
                     BlockMeter(value: usage.rolling.percent / 100, color: Bru.cardInk)
@@ -259,6 +259,43 @@ struct PanelView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(shadow: 4)
+    }
+
+    private func usageGrid(_ today: TodayStats) -> some View {
+        let hit = today.promptTokens > 0
+            ? String(format: "%.0f%%", Double(today.cacheReadTokens) / Double(today.promptTokens) * 100)
+            : "—"
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                usageStat("Req", "\(today.requests)")
+                usageStat("In", compact(today.inputTokens))
+                usageStat("Out", compact(today.completionTokens))
+                usageStat("Total", compact(today.promptTokens + today.completionTokens))
+            }
+            HStack(spacing: 6) {
+                usageStat("Cache R", compact(today.cacheReadTokens))
+                usageStat("Cache W", compact(today.cacheWriteTokens))
+                usageStat("Hit", hit)
+                usageStat("Cost", String(format: "$%.2f", today.cost))
+            }
+        }
+    }
+
+    private func usageStat(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title.uppercased())
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .tracking(0.4)
+                .foregroundStyle(Bru.cardInk.opacity(0.65))
+                .lineLimit(1)
+            Text(value)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(Bru.cardInk)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(width: 50, alignment: .leading)
     }
 
     // MARK: - System

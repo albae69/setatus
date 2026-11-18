@@ -14,22 +14,32 @@ struct Usage {
 
 struct TodayStats {
     let requests: Int
-    let promptTokens: Int
-    let completionTokens: Int
+    let inputTokens: Int
+    let outputTokens: Int
+    let reasoningTokens: Int
+    let cacheReadTokens: Int
+    let cacheWriteTokens: Int
     let cost: Double
     let models: [ModelStats]
+
+    var promptTokens: Int { inputTokens + cacheReadTokens + cacheWriteTokens }
+    var completionTokens: Int { outputTokens + reasoningTokens }
 }
 
 struct ModelStats: Identifiable {
     let name: String
     let provider: String
     let requests: Int
-    let promptTokens: Int
-    let completionTokens: Int
-    let cachedTokens: Int
+    let inputTokens: Int
+    let outputTokens: Int
+    let reasoningTokens: Int
+    let cacheReadTokens: Int
+    let cacheWriteTokens: Int
     let cost: Double
 
     var id: String { "\(name)|\(provider)" }
+    var promptTokens: Int { inputTokens + cacheReadTokens + cacheWriteTokens }
+    var completionTokens: Int { outputTokens + reasoningTokens }
 }
 
 enum UsageService {
@@ -208,14 +218,19 @@ enum UsageService {
             ModelStats(name: model.model.id,
                        provider: model.model.providerID,
                        requests: model.steps,
-                       promptTokens: model.tokens.input + model.tokens.cache.read + model.tokens.cache.write,
-                       completionTokens: model.tokens.output + model.tokens.reasoning,
-                       cachedTokens: model.tokens.cache.read,
+                       inputTokens: model.tokens.input,
+                       outputTokens: model.tokens.output,
+                       reasoningTokens: model.tokens.reasoning,
+                       cacheReadTokens: model.tokens.cache.read,
+                       cacheWriteTokens: model.tokens.cache.write,
                        cost: model.cost)
         }.sorted { $0.cost == $1.cost ? $0.requests > $1.requests : $0.cost > $1.cost }
         return TodayStats(requests: info.steps,
-                          promptTokens: info.tokens.input + info.tokens.cache.read + info.tokens.cache.write,
-                          completionTokens: info.tokens.output + info.tokens.reasoning,
+                          inputTokens: info.tokens.input,
+                          outputTokens: info.tokens.output,
+                          reasoningTokens: info.tokens.reasoning,
+                          cacheReadTokens: info.tokens.cache.read,
+                          cacheWriteTokens: info.tokens.cache.write,
                           cost: info.cost,
                           models: models)
     }
@@ -238,18 +253,29 @@ enum UsageService {
             let byModel: [String: Model]?
         }
         guard let payload = try? JSONDecoder().decode(Payload.self, from: data) else { return nil }
+        // 9router records prompt/completion totals and cache reads only, so the input
+        // share is what remains of the prompt total.
         let models = (payload.byModel ?? [:]).map { key, model in
-            ModelStats(name: model.rawModel ?? key.split(separator: "|").first.map(String.init) ?? key,
-                       provider: model.provider ?? "",
-                       requests: model.requests ?? 0,
-                       promptTokens: model.promptTokens ?? 0,
-                       completionTokens: model.completionTokens ?? 0,
-                       cachedTokens: model.cachedTokens ?? 0,
-                       cost: model.cost ?? 0)
+            let cached = model.cachedTokens ?? 0
+            let prompt = model.promptTokens ?? 0
+            return ModelStats(name: model.rawModel ?? key.split(separator: "|").first.map(String.init) ?? key,
+                              provider: model.provider ?? "",
+                              requests: model.requests ?? 0,
+                              inputTokens: max(prompt - cached, 0),
+                              outputTokens: model.completionTokens ?? 0,
+                              reasoningTokens: 0,
+                              cacheReadTokens: cached,
+                              cacheWriteTokens: 0,
+                              cost: model.cost ?? 0)
         }.sorted { $0.cost > $1.cost }
+        let cached = models.reduce(0) { $0 + $1.cacheReadTokens }
+        let prompt = payload.promptTokens ?? 0
         return TodayStats(requests: payload.requests ?? 0,
-                          promptTokens: payload.promptTokens ?? 0,
-                          completionTokens: payload.completionTokens ?? 0,
+                          inputTokens: max(prompt - cached, 0),
+                          outputTokens: payload.completionTokens ?? 0,
+                          reasoningTokens: 0,
+                          cacheReadTokens: cached,
+                          cacheWriteTokens: 0,
                           cost: payload.cost ?? 0,
                           models: models)
     }

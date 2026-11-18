@@ -85,8 +85,8 @@ The panel is 356 pt wide, drawn as flat, hard-edged cards with ink strokes and o
 shadows on one cream surface, and sized so every card fits on screen without scrolling:
 
 - **OpenCode limits** — the 5-hour window as the hero number with its reset countdown,
-  weekly and monthly windows as secondary columns, plus today's request, token, and cost
-  totals.
+  weekly and monthly windows as secondary columns, plus today's requests, input/output
+  tokens, cache read/write, hit rate, and cost totals.
 - **System** — CPU, GPU, and RAM as three tiles with usage, temperature (RAM shows
   used/total), and a block meter; power input, uptime, and extra sensors as info lines.
 - **Fan** — live RPM, an Auto/Manual pill, a slider clamped to the SMC range, min/target/max

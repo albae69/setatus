@@ -246,9 +246,9 @@ enum SelfCheck {
             }
 
             if let today = await UsageService.today() {
-                print("today:", today.requests, "req,", today.promptTokens + today.completionTokens, "tok")
+                print("today:", today.requests, "req,", today.promptTokens + today.completionTokens, "tok (in \(today.inputTokens), out \(today.outputTokens), cache \(today.cacheReadTokens)r/\(today.cacheWriteTokens)w)")
                 print("models:", today.models.map {
-                    "\($0.name)(\($0.requests) req, cached \($0.cachedTokens), $\(String(format: "%.3f", $0.cost)))"
+                    "\($0.name)(\($0.requests) req, in \($0.inputTokens), out \($0.outputTokens), cache \($0.cacheReadTokens)r/\($0.cacheWriteTokens)w, $\(String(format: "%.3f", $0.cost)))"
                 }.joined(separator: ", "))
             } else {
                 print("today: no data")

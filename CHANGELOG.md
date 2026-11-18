@@ -5,6 +5,13 @@ All notable changes to Setatus are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The OpenCode limits card breaks today's tokens into input, output, cache read, and cache
+  write, with the cache hit rate and cost beside them.
+
 ## [0.5.0] - 2026-11-18
 
 ### Added
