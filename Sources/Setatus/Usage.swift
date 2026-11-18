@@ -43,7 +43,34 @@ enum UsageService {
         let override = UserDefaults.standard.string(forKey: keyOverrideDefaultsKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if let override, !override.isEmpty { return override }
-        return keyFrom9Router()
+        return keyFrom9Router() ?? keyFromOpenCode()
+    }
+
+    /// Fallback for setups that talk to OpenCode directly instead of through 9router:
+    /// OpenCode stores its own OAuth credential and refreshes it in place.
+    static func keyFromOpenCode() -> String? {
+        let db = NSHomeDirectory() + "/.local/share/opencode/opencode.db"
+        guard FileManager.default.fileExists(atPath: db) else { return nil }
+        let sql = """
+            select coalesce(json_extract(value,'$.access'), json_extract(value,'$.key')),
+                   json_extract(value,'$.expires')
+            from credential
+            where integration_id = 'opencode' and active = 1
+            order by time_updated desc limit 1;
+            """
+        guard let output = Shell.run("/usr/bin/sqlite3",
+                                     ["-readonly", "-cmd", ".timeout 5000", db, sql])?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !output.isEmpty else { return nil }
+
+        let fields = output.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+        let key = String(fields[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, key != "null" else { return nil }
+
+        if fields.count > 1, let expires = Double(fields[1]) {
+            guard Date(timeIntervalSince1970: expires / 1000) > Date() else { return nil }
+        }
+        return key
     }
 
     static func keyFrom9Router() -> String? {
@@ -96,7 +123,12 @@ enum UsageService {
                      monthly: convert(payload.usage.monthly))
     }
 
-    static func today() -> TodayStats? {
+    static func today() async -> TodayStats? {
+        if let stats = await todayFromOpenCode() { return stats }
+        return todayFrom9Router()
+    }
+
+    static func todayFrom9Router() -> TodayStats? {
         let db = NSHomeDirectory() + "/.9router/db/data.sqlite"
         guard FileManager.default.fileExists(atPath: db) else { return nil }
         let sql = "select data from usageDaily where dateKey = date('now','localtime') limit 1;"
@@ -104,6 +136,88 @@ enum UsageService {
             .trimmingCharacters(in: .whitespacesAndNewlines),
               let data = raw.data(using: .utf8), !raw.isEmpty else { return nil }
         return parseToday(data)
+    }
+
+    /// OpenCode has no per-message usage table, but its local service aggregates sessions
+    /// for a time range. The service address and password live in its state directory.
+    static func todayFromOpenCode() async -> TodayStats? {
+        struct Service: Decodable {
+            let url: URL
+            let password: String
+        }
+        let path = NSHomeDirectory() + "/.local/state/opencode/service.json"
+        guard let data = FileManager.default.contents(atPath: path),
+              let service = try? JSONDecoder().decode(Service.self, from: data) else { return nil }
+
+        let start = Calendar.current.startOfDay(for: Date())
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start
+        guard var components = URLComponents(
+            url: service.url.appendingPathComponent("api/experimental/session/stats"),
+            resolvingAgainstBaseURL: false
+        ) else { return nil }
+        components.queryItems = [
+            URLQueryItem(name: "from", value: String(Int(start.timeIntervalSince1970 * 1000))),
+            URLQueryItem(name: "to", value: String(Int(end.timeIntervalSince1970 * 1000))),
+        ]
+        guard let url = components.url else { return nil }
+
+        var request = URLRequest(url: url)
+        let credentials = Data("opencode:\(service.password)".utf8).base64EncodedString()
+        request.setValue("Basic \(credentials)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 10
+        guard let (payload, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else { return nil }
+        return parseOpenCodeToday(payload)
+    }
+
+    static func parseOpenCodeToday(_ data: Data) -> TodayStats? {
+        struct Payload: Decodable {
+            struct Tokens: Decodable {
+                struct Cache: Decodable {
+                    let read: Int
+                    let write: Int
+                }
+                let input: Int
+                let output: Int
+                let reasoning: Int
+                let cache: Cache
+            }
+            struct Model: Decodable {
+                struct Ref: Decodable {
+                    let id: String
+                    let providerID: String
+                }
+                let model: Ref
+                let steps: Int
+                let tokens: Tokens
+                let cost: Double
+            }
+            struct Info: Decodable {
+                let steps: Int
+                let tokens: Tokens
+                let cost: Double
+                let models: [Model]
+            }
+            let data: Info
+        }
+        guard let payload = try? JSONDecoder().decode(Payload.self, from: data) else { return nil }
+
+        let info = payload.data
+        let models = info.models.map { model in
+            ModelStats(name: model.model.id,
+                       provider: model.model.providerID,
+                       requests: model.steps,
+                       promptTokens: model.tokens.input + model.tokens.cache.read + model.tokens.cache.write,
+                       completionTokens: model.tokens.output + model.tokens.reasoning,
+                       cachedTokens: model.tokens.cache.read,
+                       cost: model.cost)
+        }.sorted { $0.cost == $1.cost ? $0.requests > $1.requests : $0.cost > $1.cost }
+        return TodayStats(requests: info.steps,
+                          promptTokens: info.tokens.input + info.tokens.cache.read + info.tokens.cache.write,
+                          completionTokens: info.tokens.output + info.tokens.reasoning,
+                          cost: info.cost,
+                          models: models)
     }
 
     static func parseToday(_ data: Data) -> TodayStats? {

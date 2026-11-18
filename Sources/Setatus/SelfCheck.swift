@@ -223,22 +223,6 @@ enum SelfCheck {
         print("processes:", Processes.top(limit: 20).map { "\($0.name)(\($0.pid)) \(String(format: "%.0f", $0.memoryMB))MB" }.joined(separator: ", "))
         print("ports:", Ports.scan().map { ":\($0.port) \($0.process)(\($0.pid))" }.joined(separator: ", "))
 
-        if let key = UsageService.apiKey() {
-            let semaphore = DispatchSemaphore(value: 0)
-            Task {
-                do {
-                    let usage = try await UsageService.fetchUsage(key: key)
-                    print("usage:", String(format: "5h=%.0f%% week=%.0f%% month=%.0f%%", usage.rolling.percent, usage.weekly.percent, usage.monthly.percent))
-                } catch {
-                    print("usage: error \(error)")
-                }
-                semaphore.signal()
-            }
-            semaphore.wait()
-        } else {
-            print("usage: no key")
-        }
-
         // Model breakdown: 9router's usageDaily carries byModel; missing keys must not crash.
         let sample = #"{"requests":3,"cost":0.3,"byModel":{"a|p":{"requests":2,"cost":0.25,"rawModel":"a","provider":"p"},"b|p":{"requests":1,"cost":0.05}}}"#
         if let parsed = sample.data(using: .utf8).flatMap(UsageService.parseToday) {
@@ -248,11 +232,30 @@ enum SelfCheck {
             print("modeltest: failed to parse")
         }
 
-        if let today = UsageService.today() {            print("today:", today.requests, "req,", today.promptTokens + today.completionTokens, "tok")
-            print("models:", today.models.map {
-                "\($0.name)(\($0.requests) req, cached \($0.cachedTokens), $\(String(format: "%.3f", $0.cost)))"
-            }.joined(separator: ", "))
+        let semaphore = DispatchSemaphore(value: 0)
+        Task {
+            if let key = UsageService.apiKey() {
+                do {
+                    let usage = try await UsageService.fetchUsage(key: key)
+                    print("usage:", String(format: "5h=%.0f%% week=%.0f%% month=%.0f%%", usage.rolling.percent, usage.weekly.percent, usage.monthly.percent))
+                } catch {
+                    print("usage: error \(error)")
+                }
+            } else {
+                print("usage: no key")
+            }
+
+            if let today = await UsageService.today() {
+                print("today:", today.requests, "req,", today.promptTokens + today.completionTokens, "tok")
+                print("models:", today.models.map {
+                    "\($0.name)(\($0.requests) req, cached \($0.cachedTokens), $\(String(format: "%.3f", $0.cost)))"
+                }.joined(separator: ", "))
+            } else {
+                print("today: no data")
+            }
+            semaphore.signal()
         }
+        semaphore.wait()
 
         exit(0)
     }

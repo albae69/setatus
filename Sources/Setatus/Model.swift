@@ -379,12 +379,12 @@ final class Model: ObservableObject {
         guard let key else {
             usage = nil
             today = nil
-            usageError = "No opencode-go key found"
+            usageError = "No OpenCode API key found"
             return
         }
         do {
             usage = try await UsageService.fetchUsage(key: key)
-            today = await Task.detached { UsageService.today() }.value
+            today = await Task.detached { await UsageService.today() }.value
             usageError = nil
             updatedAt = Date()
         } catch UsageService.UsageError.unauthorized {
