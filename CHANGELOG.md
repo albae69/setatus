@@ -5,6 +5,20 @@ All notable changes to Setatus are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-11-18
+
+### Changed
+
+- **Set API key** moved out of the popover into the right-click menu (`Set API Key…`),
+  entered in a secure alert field; leaving it empty still falls back to 9router's key.
+
+### Fixed
+
+- The popover no longer jumps toward the centre of the screen when the panel grows or
+  shrinks while open (slider release adds the fan/charge status line). It now anchors to a
+  1 pt rect at the centre of the status item instead of the item's full bounds, so AppKit
+  cannot re-anchor it to the button's far edge during a resize.
+
 ## [0.4.0] - 2026-11-18
 
 ### Changed
@@ -112,7 +126,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Popover with OpenCode limit windows, system tiles, fan control, and internet stats.
 - Privileged fan helper, Launch at Login, and `--selfcheck` / `--killtest` checks.
 
-[Unreleased]: https://github.com/albae69/setatus/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/albae69/setatus/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/albae69/setatus/releases/tag/v0.4.1
+[0.4.0]: https://github.com/albae69/setatus/releases/tag/v0.4.0
 [0.3.0]: https://github.com/albae69/setatus/releases/tag/v0.3.0
 [0.2.0]: https://github.com/albae69/setatus/releases/tag/v0.2.0
 [0.1.3]: https://github.com/albae69/setatus/releases/tag/v0.1.3
