@@ -2,3 +2,6 @@
 Setatus.app/
 .DS_Store
 .swiftpm/
+graphify-out/
+dist/
+Setatus.dmg

@@ -32,4 +32,11 @@ PLIST
 
 codesign --force --sign - "$APP"
 echo "Built $PWD/$APP"
-echo "Run: open $PWD/$APP"
+
+rm -rf dist Setatus.dmg
+mkdir -p dist
+cp -R "$APP" dist/
+ln -s /Applications dist/Applications
+hdiutil create -volname "Setatus" -srcfolder dist -ov -format UDZO Setatus.dmg >/dev/null
+echo "Packaged $PWD/Setatus.dmg"
+echo "Install: open Setatus.dmg  (or run in place: open $PWD/$APP)"

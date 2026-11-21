@@ -27,6 +27,17 @@ enum LaunchAtLogin {
 
     private static func install() -> Bool {
         guard let executable = Bundle.main.executablePath else { return false }
+        return write(executable: executable)
+    }
+
+    /// Points the login item at the app after it moved, e.g. into /Applications. The
+    /// running job keeps its old path until logout; launchd reads the new one next login.
+    static func retarget(to executable: String) {
+        guard isEnabled else { return }
+        _ = write(executable: executable)
+    }
+
+    private static func write(executable: String) -> Bool {
         let plist: [String: Any] = [
             "Label": label,
             "ProgramArguments": [executable],
