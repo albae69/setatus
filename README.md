@@ -8,7 +8,7 @@
 [![Swift](https://img.shields.io/badge/swift-5.9-orange?logo=swift)](#requirements)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)](#requirements)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.5.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue)](CHANGELOG.md)
 [![Status](https://img.shields.io/badge/status-personal%20project-blue)](https://github.com/albae69/setatus)
 [![GitHub stars](https://img.shields.io/github/stars/albae69/setatus?style=social)](https://github.com/albae69/setatus)
 
