@@ -166,6 +166,8 @@ enum FanControl {
         var lastModeCheck = Date.distantPast
         var chargeKey: String?
         var chargeInhibited = false
+        var chargeLedGreen = false
+        var ledReset = false
         var chargeReset = false
         var lastChargeWrite = Date.distantPast
         var lastChargeState: ChargeState?
@@ -175,6 +177,7 @@ enum FanControl {
                 log("exit: signal", home: home)
                 restore(smc)
                 releaseCharge(smc, key: chargeKey, inhibited: &chargeInhibited, home: home)
+                if chargeLedGreen { _ = ChargeControl.setLed(smc, .system) }
                 exit(0)
             }
 
@@ -189,6 +192,11 @@ enum FanControl {
             }
             if let key = chargeKey, chargeReset {
                 chargeInhibited = ChargeControl.isInhibited(smc, key: key)
+            }
+            // A crash can leave the ring forced green; hand it back to the system once.
+            if !ledReset {
+                _ = ChargeControl.setLed(smc, .system)
+                ledReset = true
             }
             let chargeRequest = currentCharge(chargeURL, directory: expectedDirectory)
             let chargeLimit = chargeRequest?.limit ?? 0
@@ -211,9 +219,17 @@ enum FanControl {
             } else {
                 releaseCharge(smc, key: chargeKey, inhibited: &chargeInhibited, home: home)
             }
+            // macOS keeps the MagSafe ring amber until the battery is full, which a
+            // charge limit never reaches; force green while the limit holds it paused.
+            let wantsGreen = ChargeControl.ledGreen(limit: chargeLimit, inhibited: chargeInhibited)
+            if wantsGreen != chargeLedGreen, ChargeControl.setLed(smc, wantsGreen ? .green : .system) {
+                chargeLedGreen = wantsGreen
+                log("charge: led \(wantsGreen ? "green" : "system")", home: home)
+            }
             let state = ChargeState(supported: chargeKey != nil, inhibited: chargeInhibited,
                                     limit: chargeLimit, percent: percent,
-                                    at: Date().timeIntervalSince1970)
+                                    at: Date().timeIntervalSince1970,
+                                    led: smc.meta(ChargeControl.ledKey)?.writable == true)
             let changed = lastChargeState.map {
                 $0.supported != state.supported || $0.inhibited != state.inhibited
                     || $0.limit != state.limit

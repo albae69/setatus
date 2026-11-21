@@ -11,6 +11,8 @@ struct ChargeState: Codable {
     var limit: Int
     var percent: Double?
     var at: TimeInterval
+    /// True when the helper can drive the MagSafe ring (`ACLC` is writable).
+    var led: Bool?
 }
 
 /// Battery charge limit, applied by the root helper: the app only writes a request file
@@ -64,6 +66,25 @@ enum ChargeControl {
             ? smc.writeUInt32(key, inhibit ? 1 : 0)
             : smc.writeUInt8(key, inhibit ? 1 : 0)
         return result == 0 || result == 0x87
+    }
+
+    /// MagSafe LED override: 0 hands the light back to the system, 3 forces green.
+    /// macOS only shows green at 100%, so a limit would keep the ring amber forever.
+    enum Led: UInt8 {
+        case system = 0
+        case green = 3
+    }
+
+    static let ledKey = "ACLC"
+
+    static func setLed(_ smc: SMC, _ led: Led) -> Bool {
+        guard smc.meta(ledKey)?.writable == true else { return false }
+        return smc.writeUInt8(ledKey, led.rawValue) == 0
+    }
+
+    /// Only force green while a limit actually pauses charging; 0 and 100 belong to the system.
+    static func ledGreen(limit: Int, inhibited: Bool) -> Bool {
+        limit > 0 && limit < 100 && inhibited
     }
 
     enum Action { case inhibit, resume, none }
