@@ -10,10 +10,10 @@ struct SetatusApp {
         }
         if CommandLine.arguments.contains("--selfcheck") || CommandLine.arguments.contains("--speedtest")
             || CommandLine.arguments.contains("--smc") || CommandLine.arguments.contains("--charge")
-            || CommandLine.arguments.contains("--charge-write") {
+            || CommandLine.arguments.contains("--charge-write") || CommandLine.arguments.contains("--ledtest") {
             SelfCheck.run()
         }
-        if let other = duplicateInstance() {
+        if let other = duplicateInstance(), !CommandLine.arguments.contains("--icontest") {
             other.activate(options: [.activateIgnoringOtherApps])
             exit(0)
         }
@@ -44,11 +44,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var iconOnly = false
     private var lastRestoreAttempt = Date.distantPast
     private var titleOverhead: CGFloat = 0
+    private var iconTestFillers: [NSStatusItem] = []
+    private static let iconTest = CommandLine.arguments.contains("--icontest")
     private lazy var menu = buildMenu()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Runs first so the offer is the first thing a new user sees; moving hands off
+        // to the installed copy and terminates this one.
+        InstallLocation.promptIfNeeded()
         model.start()
 
+        if Self.iconTest { fillBarForIconTest() }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.target = self
@@ -74,18 +80,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.togglePopover()
             }
         }
+        if Self.iconTest { runIconTest() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         // Restoring writes fan.json, which would recreate the config we just deleted.
-        if !uninstalling { model.restoreFan() }
+        if !uninstalling { model.fan.restore() }
+    }
+
+    private var statusTitle: String {
+        Self.iconTest ? "SETATUS TEST" : model.menuTitle
     }
 
     private func updateTitle() {
         guard let button = statusItem?.button else { return }
         // Resizing the status item while its popover is open dismisses the popover.
         guard !popover.isShown else { return }
-        let title = model.menuTitle
+        let title = statusTitle
 
         if iconOnly {
             button.toolTip = title
@@ -117,8 +128,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private static let menuFont = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
 
+    private static func bundleIcon() -> NSImage? {
+        // NSApp.applicationIconImage comes from the LaunchServices cache, which can
+        // outlive an icon swap; read the bundle file so About always shows the current one.
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: url) {
+            return icon
+        }
+        return NSApp.applicationIconImage
+    }
+
     private func applyIcon(_ button: NSStatusBarButton) {
-        if let icon = NSApp.applicationIconImage?.copy() as? NSImage {
+        if let icon = Self.bundleIcon()?.copy() as? NSImage {
             icon.size = NSSize(width: 18, height: 18)
             button.title = ""
             button.image = icon
@@ -144,11 +165,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let window = button.window, let screen = window.screen ?? NSScreen.main else { return false }
         var minX = screen.frame.minX
         if #available(macOS 12.0, *), let right = screen.auxiliaryTopRightArea {
-            guard window.frame.maxX > right.minX else { return false }
             minX = right.minX
         }
         let width = (title as NSString).size(withAttributes: [.font: button.font ?? Self.menuFont]).width
-        return width + titleOverhead <= window.frame.maxX - minX
+        return Self.titleFits(width: width, overhead: titleOverhead,
+                              itemMaxX: window.frame.maxX, usableMinX: minX)
+    }
+
+    /// A status item grows leftward from its right edge, so a title fits when it still
+    /// clears the usable left edge; the notch clips anything to its left.
+    static func titleFits(width: CGFloat, overhead: CGFloat, itemMaxX: CGFloat, usableMinX: CGFloat) -> Bool {
+        guard itemMaxX > usableMinX else { return false }
+        return width + overhead <= itemMaxX - usableMinX
+    }
+
+    /// Fillers created before the status item sit to its right, so a full bar pushes
+    /// the app's item under the notch; removing them gives the space back.
+    private func fillBarForIconTest() {
+        for index in 0..<16 {
+            let filler = NSStatusBar.system.statusItem(withLength: 120)
+            filler.button?.title = "F\(index)"
+            iconTestFillers.append(filler)
+        }
+    }
+
+    private func runIconTest() {
+        let cases: [(CGFloat, CGFloat, CGFloat, CGFloat, Bool)] = [
+            (100, 10, 1200, 848, true),
+            (100, 10, 900, 848, false),
+            (42, 10, 900, 848, true),
+            (52, 0, 900, 848, true),
+            (52, 1, 900, 848, false),
+            (100, 10, 848, 848, false),
+            (100, 10, 800, 900, false),
+        ]
+        let fitsOK = cases.allSatisfy { width, overhead, maxX, minX, expected in
+            Self.titleFits(width: width, overhead: overhead, itemMaxX: maxX, usableMinX: minX) == expected
+        }
+        print("icontest: fits", fitsOK ? "ok" : "failed")
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+            checkIconCollapse(attempt: 0, fitsOK: fitsOK)
+        }
+    }
+
+    private func checkIconCollapse(attempt: Int, fitsOK: Bool) {
+        guard let button = statusItem.button else {
+            print("icontest: failed, no status button")
+            exit(1)
+        }
+        updateTitle()
+        let collapsed = iconOnly && button.image != nil && button.title.isEmpty
+        if !collapsed, attempt < 4 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
+                checkIconCollapse(attempt: attempt + 1, fitsOK: fitsOK)
+            }
+            return
+        }
+        let tooltip = button.toolTip?.isEmpty == false
+        for filler in iconTestFillers { NSStatusBar.system.removeStatusItem(filler) }
+        iconTestFillers.removeAll()
+        restoreAfterIconTest(attempt: 0, fitsOK: fitsOK, collapsed: collapsed, tooltip: tooltip)
+    }
+
+    private func restoreAfterIconTest(attempt: Int, fitsOK: Bool, collapsed: Bool, tooltip: Bool) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
+            guard let button = statusItem.button else {
+                print("icontest: failed, no status button")
+                exit(1)
+            }
+            lastRestoreAttempt = .distantPast
+            updateTitle()
+            let restored = !iconOnly && button.image == nil && !button.title.isEmpty
+            if !restored, attempt < 4 {
+                restoreAfterIconTest(attempt: attempt + 1, fitsOK: fitsOK, collapsed: collapsed, tooltip: tooltip)
+                return
+            }
+            let ok = fitsOK && collapsed && tooltip && restored
+            print("icontest:", ok ? "ok" : "failed",
+                  "fits=\(fitsOK) collapsed=\(collapsed) tooltip=\(tooltip) restored=\(restored)")
+            exit(ok ? 0 : 1)
+        }
     }
 
     @objc private func statusClicked() {
@@ -161,6 +258,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private var observesPopoverWindow = false
+
+    private func observePopoverWindow(_ window: NSWindow) {
+        guard !observesPopoverWindow else { return }
+        observesPopoverWindow = true
+        for name in [NSWindow.didResizeNotification, NSWindow.didMoveNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(popoverWindowMoved(_:)),
+                                                   name: name, object: window)
+        }
+    }
+
+    @objc private func popoverWindowMoved(_ note: Notification) {
+        guard let window = note.object as? NSWindow else { return }
+        keepBelowMenuBar(window)
+    }
+
+    /// AppKit anchors a status item popover to the item's drawn frame; on a tall menu
+    /// bar that leaves the arrow inside the bar, so pull the window back under it.
+    private func keepBelowMenuBar(_ window: NSWindow) {
+        guard let screen = window.screen ?? NSScreen.main else { return }
+        let overflow = window.frame.maxY - screen.visibleFrame.maxY
+        guard overflow > 0 else { return }
+        var frame = window.frame
+        frame.origin.y -= overflow
+        window.setFrame(frame, display: true)
+    }
+
     @objc private func togglePopover() {
         guard let button = statusItem.button else { return }
         if popover.isShown {
@@ -170,6 +294,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // edge when the popover resizes, which lands it near the screen centre.
             popover.show(relativeTo: NSRect(x: button.bounds.midX, y: button.bounds.minY, width: 1, height: 1),
                          of: button, preferredEdge: .minY)
+            if let window = popover.contentViewController?.view.window {
+                keepBelowMenuBar(window)
+                observePopoverWindow(window)
+            }
             popover.contentViewController?.view.window?.makeKey()
         }
     }
@@ -240,8 +368,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             for entry in metricsMenu.items {
                 guard let raw = entry.representedObject as? String,
                       let metric = MenuMetric(rawValue: raw) else { continue }
-                let visible = model.metrics.contains(metric)
-                let locked = visible && model.metrics.count == 1
+                let visible = model.shownMetrics.contains(metric)
+                let locked = visible && model.shownMetrics.count == 1
 
                 if let submenu = entry.submenu {
                     entry.state = visible ? .on : .off
@@ -265,9 +393,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func refreshAll() {
         updateTitle()
-        model.refreshProcesses()
-        model.refreshPorts()
-        Task { await model.refreshUsage() }
+        model.processes.refresh()
+        model.ports.refresh()
+        Task { await model.usage.refresh() }
     }
 
     @objc private func setAPIKey() {
@@ -284,7 +412,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         UserDefaults.standard.set(field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
                                   forKey: UsageService.keyOverrideDefaultsKey)
-        Task { await model.refreshUsage() }
+        Task { await model.usage.refresh() }
     }
 
     @objc private func resetMetrics() {
@@ -330,7 +458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Hand the fans back to firmware now, so nothing rewrites fan.json while the
         // admin script is deleting it.
         titleTimer?.invalidate()
-        model.restoreFan()
+        model.fan.restore()
 
         Task { @MainActor in
             let removed = await Task.detached { FanControl.uninstall() }.value
@@ -358,11 +486,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .foregroundColor: NSColor.secondaryLabelColor,
             ])
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.5.0"
-        NSApp.orderFrontStandardAboutPanel(options: [
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [
             .applicationName: "Setatus",
             .applicationVersion: version,
             .credits: credits,
-        ])
+        ]
+        if let icon = Self.bundleIcon() {
+            options[.applicationIcon] = icon
+        }
+        NSApp.orderFrontStandardAboutPanel(options: options)
         NSApp.activate(ignoringOtherApps: true)
     }
 }

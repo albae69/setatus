@@ -9,6 +9,26 @@ enum SelfCheck {
             exit(0)
         }
 
+        if CommandLine.arguments.contains("--ledtest") {
+            guard let smc = SMC() else { print("smc unavailable"); exit(1) }
+            guard let meta = smc.meta(ChargeControl.ledKey) else { print("ACLC missing"); exit(1) }
+            let original = smc.readUInt8(ChargeControl.ledKey)
+            print("ledtest: ACLC type=\(meta.type) size=\(meta.size) writable=\(meta.writable) original=\(original.map(String.init) ?? "—")")
+            for (name, value) in [("off", UInt8(1)), ("green", ChargeControl.Led.green.rawValue)] {
+                let result = smc.writeUInt8(ChargeControl.ledKey, value)
+                // ACLC reads one write behind until the SMC latches it, so sample after a beat.
+                Thread.sleep(forTimeInterval: 1)
+                let read = smc.readUInt8(ChargeControl.ledKey)
+                print("ledtest: \(name) write=\(result.map(String.init) ?? "nil") read=\(read.map(String.init) ?? "—")")
+                Thread.sleep(forTimeInterval: 5)
+            }
+            let restore = smc.writeUInt8(ChargeControl.ledKey, original ?? ChargeControl.Led.system.rawValue)
+            Thread.sleep(forTimeInterval: 1)
+            let after = smc.readUInt8(ChargeControl.ledKey)
+            print("ledtest: restore write=\(restore.map(String.init) ?? "nil") read=\(after.map(String.init) ?? "—")")
+            exit(0)
+        }
+
         if CommandLine.arguments.contains("--charge") {
             let smc = SMC()
             let keys = ["CHTE", "CH0B", "CHWA"].map { "\($0)=\(smc?.meta($0) != nil ? "present" : "missing")" }
@@ -37,6 +57,34 @@ enum SelfCheck {
             }
             print("chargetest keys:", keysOK ? "ok" : "failed")
 
+            let ledCases: [(Int, Bool, Bool)] = [
+                (80, true, true), (80, false, false), (100, true, false),
+                (0, true, false), (50, true, true), (99, true, true),
+            ]
+            let ledLogic = ledCases.allSatisfy { ChargeControl.ledGreen(limit: $0.0, inhibited: $0.1) == $0.2 }
+            let ledRaw = ChargeControl.Led.system.rawValue == 0 && ChargeControl.Led.green.rawValue == 3
+                && ChargeControl.ledKey == "ACLC"
+            print("chargetest led:", ledLogic && ledRaw ? "ok" : "failed")
+
+            // The helper can outlive an app update: a state file without `led` must still decode.
+            let home = FileManager.default.temporaryDirectory
+                .appendingPathComponent("setatus-chargetest-\(UUID().uuidString)").path
+            try? FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+            let stateURL = ChargeControl.stateURL(home: home)
+            try? FileManager.default.createDirectory(at: stateURL.deletingLastPathComponent(),
+                                                     withIntermediateDirectories: true)
+            let current = ChargeState(supported: true, inhibited: true, limit: 80,
+                                      percent: 80, at: 0, led: true)
+            try? JSONEncoder().encode(current).write(to: stateURL)
+            let decoded = ChargeControl.state(home: home)
+            let legacy = #"{"supported":true,"inhibited":false,"limit":80,"at":0}"#
+            try? legacy.data(using: .utf8)?.write(to: stateURL)
+            let withoutLed = ChargeControl.state(home: home)
+            try? FileManager.default.removeItem(atPath: home)
+            let stateOK = decoded?.led == true && decoded?.inhibited == true
+                && withoutLed?.limit == 80 && withoutLed?.led == nil
+            print("chargetest led state:", stateOK ? "ok" : "failed")
+
             let prefixes = ["CH", "B0", "BU", "AC", "BC"]
             let names = smc?.keyNames() ?? []
             let matching = names.filter { name in
@@ -50,6 +98,9 @@ enum SelfCheck {
             if let bytes = smc?.readBytes("CHTE") {
                 print("charge: CHTE bytes", bytes.map { String(format: "%02x", $0) }.joined(separator: " "))
             }
+            print("charge: LED (ACLC)", smc?.meta(ChargeControl.ledKey).map {
+                "present writable=\($0.writable) value=\(smc?.readUInt8(ChargeControl.ledKey).map(String.init) ?? "—")"
+            } ?? "missing")
             for key in ["CHSC", "CHCC", "CHCE"] {
                 print("charge: \(key)", smc?.readUInt8(key).map(String.init) ?? "—")
             }
@@ -73,6 +124,16 @@ enum SelfCheck {
                 let released = ChargeControl.write(smc, key: key, inhibit: false)
                 let after = smc.readUInt32(key)
                 print("\(key) type=\(meta.type) size=\(meta.size) writable=\(meta.writable) before=\(before ?? 0) inhibit=\(written) raw=\(raw.map(String.init) ?? "nil") during=\(during ?? 0) release=\(released) after=\(after ?? 0)")
+            }
+            if let meta = smc.meta(ChargeControl.ledKey) {
+                let before = smc.readUInt8(ChargeControl.ledKey)
+                let green = smc.writeUInt8(ChargeControl.ledKey, ChargeControl.Led.green.rawValue)
+                let during = smc.readUInt8(ChargeControl.ledKey)
+                let restore = smc.writeUInt8(ChargeControl.ledKey, before ?? ChargeControl.Led.system.rawValue)
+                let after = smc.readUInt8(ChargeControl.ledKey)
+                print("ACLC type=\(meta.type) size=\(meta.size) writable=\(meta.writable) before=\(before.map(String.init) ?? "—") green=\(green.map(String.init) ?? "nil") during=\(during.map(String.init) ?? "—") restore=\(restore.map(String.init) ?? "nil") after=\(after.map(String.init) ?? "—")")
+            } else {
+                print("ACLC missing")
             }
             exit(0)
         }
@@ -114,7 +175,8 @@ enum SelfCheck {
                 let defaults = UserDefaults.standard
                 let saved = defaults.dictionary(forKey: "menuDetails")
                 let model = Model()
-                model.temps = [("CPU", 61.4), ("GPU", 47.6)]
+                model.metricsStore.temps = [TempReading(label: "CPU", celsius: 61.4),
+                                            TempReading(label: "GPU", celsius: 47.6)]
 
                 model.setDetail(.temperature, for: .cpu)
                 let cpuTemp = model.menuTitle.contains("61°")
@@ -130,7 +192,7 @@ enum SelfCheck {
                 model.setDetail(.percent, for: .gpu)
 
                 // No sensor for the group: stay on percent instead of printing a blank degree.
-                model.temps = []
+                model.metricsStore.temps = []
                 model.setDetail(.temperature, for: .cpu)
                 let fallback = !model.menuTitle.contains("°") && cpuPercent
 

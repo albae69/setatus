@@ -51,4 +51,27 @@ enum Fmt {
         if hours > 0 { return "\(hours)h \(minutes)m" }
         return "\(minutes)m"
     }
+
+    /// Reset time in words: in 2d 4h, in 3h 12m, in 41m, now.
+    static func countdown(_ date: Date) -> String {
+        let seconds = Int(date.timeIntervalSinceNow)
+        if seconds <= 0 { return "now" }
+        let days = seconds / 86_400
+        let hours = (seconds % 86_400) / 3_600
+        let minutes = (seconds % 3_600) / 60
+        if days > 0 { return "in \(days)d \(hours)h" }
+        if hours > 0 { return "in \(hours)h \(minutes)m" }
+        return "in \(minutes)m"
+    }
+
+    static func bytes(_ value: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .memory)
+    }
+
+    /// Token counts: 1.2M, 34.5k, 812.
+    static func compact(_ value: Int) -> String {
+        value >= 1_000_000 ? String(format: "%.1fM", Double(value) / 1_000_000)
+            : value >= 1_000 ? String(format: "%.1fk", Double(value) / 1_000)
+            : "\(value)"
+    }
 }
