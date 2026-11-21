@@ -92,7 +92,9 @@ shadows on one cream surface, and sized so every card fits on screen without scr
 - **Fan** — live RPM, an Auto/Manual pill, a slider clamped to the SMC range, min/target/max
   labels, and an Auto button while manual control is active.
 - **Charge limit** — the target percent as a hero number, a Paused/SMC limit pill, and a
-  slider (root helper holds the battery at the set percent via SMC).
+  slider (root helper holds the battery at the set percent via SMC). When the limit pauses
+  charging, the MagSafe ring is forced green; it returns to system control when charging
+  resumes or the limit is turned off.
 - **Internet** — download/upload speed side by side, cumulative totals since boot, the
   local IPv4 address, and a **Speed test** button (Cloudflare download/upload, Mbps).
 - **Activity** — one card with a **Ports / Processes** segmented switch. Ports lists every
@@ -131,6 +133,8 @@ git clone https://github.com/albae69/setatus.git
 cd setatus
 
 bash scripts/build-app.sh
+open Setatus.dmg     # drag Setatus into Applications
+# or run the build in place, which offers to move itself:
 open Setatus.app
 ```
 
@@ -141,16 +145,19 @@ The build script:
 3. Generates `Info.plist` (`dev.bae.setatus`, `LSUIElement`).
 4. Copies `Assets/AppIcon.icns`.
 5. Ad-hoc signs the bundle with `codesign --force --sign -`.
+6. Packages `Setatus.dmg`: the app plus an `Applications` symlink.
 
-To keep it in Applications:
+To install, open `Setatus.dmg` and drag **Setatus** into **Applications**. If the app is
+launched from anywhere else, it offers to move itself there on first launch and carries the
+Launch at Login item over to the new path. Manual copy:
 
 ```sh
 ditto Setatus.app /Applications/Setatus.app
 open /Applications/Setatus.app
 ```
 
-There is no DMG and no notarization. Because the bundle is ad-hoc signed, Gatekeeper may
-warn on first launch — open it from Finder with **Open** if that happens.
+There is no installer and no notarization. Because the bundle is ad-hoc signed, Gatekeeper
+may warn on first launch — open it from Finder with **Open** if that happens.
 
 ## Usage
 
@@ -194,6 +201,7 @@ expired. A manually entered key is stored in `UserDefaults` and takes precedence
 | Power input | `AppleSmartBattery` → `PowerTelemetryData.SystemPowerIn` (mW) |
 | Battery state | `IOPSCopyPowerSourcesInfo` |
 | Charge limit | SMC charging key (`CHTE`, `CH0B`, or `CHWA`) via the root helper |
+| MagSafe LED | SMC `ACLC` (`0` system, `3` green) via the root helper |
 | Uptime | `sysctl` `KERN_BOOTTIME` |
 | OpenCode usage | `GET https://opencode.ai/zen/go/v1/usage` |
 | Today's usage | OpenCode local service (`/api/experimental/session/stats`), falling back to 9router `usageDaily` |
@@ -245,6 +253,12 @@ active, and the daemon reads the SMC key back each tick to rewrite it if the fir
 drifted. The key is `CHTE` (`ui32`) on current Apple Silicon firmware, or `CHWA`/`CH0B`
 (`ui8`) on older ones; machines without one get a disabled slider and a note.
 
+macOS only turns the MagSafe ring green when the battery reaches 100%, so a hold point below
+that stays amber. While the limit is pausing charge, the daemon writes `ACLC = 3` to force
+green, and `ACLC = 0` to hand the light back to the system as soon as charging resumes, the
+limit is set to 100, or the helper stops. `ACLC` only changes the light; it has no effect on
+charging. Macs without a writable `ACLC` are left alone.
+
 Quitting Setatus writes `rpm = 0`, so the fan returns to automatic control immediately.
 
 > [!WARNING]
@@ -269,8 +283,10 @@ Quitting Setatus writes `rpm = 0`, so the fan returns to automatic control immed
 ./Setatus.app/Contents/MacOS/Setatus --selfcheck  # print sensor, network, and usage readings
 ./Setatus.app/Contents/MacOS/Setatus --killtest   # verify process termination
 ./Setatus.app/Contents/MacOS/Setatus --open-panel # start with the popover open
-./Setatus.app/Contents/MacOS/Setatus --charge     # list charge keys and check limit hysteresis
-./Setatus.app/Contents/MacOS/Setatus --charge-write # probe the charge key write/read/release (root only)
+./Setatus.app/Contents/MacOS/Setatus --charge     # list charge keys, check limit hysteresis and LED logic
+./Setatus.app/Contents/MacOS/Setatus --charge-write # probe charge and ACLC writes (root only)
+./Setatus.app/Contents/MacOS/Setatus --ledtest    # cycle ACLC off/green, then restore (root only)
+./Setatus.app/Contents/MacOS/Setatus --icontest   # fill the menu bar to verify the icon fallback
 ./Setatus.app/Contents/MacOS/Setatus --smc        # dump charging-related SMC keys
 ./Setatus.app/Contents/MacOS/Setatus --speedtest  # run the Cloudflare speed test
 ```
@@ -354,6 +370,7 @@ sudo rm -f /Library/LaunchDaemons/dev.bae.setatus.fanhelper.plist \
 - Fan control is hardware-dependent.
 - Charge limiting is hardware-dependent: the SMC must expose `CHTE`, `CH0B`, or `CHWA`.
   The slider shows a message and stays disabled when no key exists.
+- MagSafe LED control needs a writable `ACLC`; Macs without one keep the system light.
 - GPU utilization is only available when the accelerator exposes
   `Device Utilization %`.
 - Network totals are kernel counters since boot, summed over non-loopback interfaces.
@@ -361,7 +378,8 @@ sudo rm -f /Library/LaunchDaemons/dev.bae.setatus.fanhelper.plist \
   system-wide lock.
 - The fan helper is a copy of the app binary, so an app update needs one admin prompt to
   refresh it (handled automatically on the next manual target).
-- The app is not notarized and has no installer.
+- The app is not notarized; it ships as `Setatus.dmg` with an Applications symlink and
+  offers to move itself into Applications when launched from elsewhere.
 
 ## Changelog
 

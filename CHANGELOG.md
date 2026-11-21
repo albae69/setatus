@@ -7,10 +7,33 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Running Setatus from outside Applications offers to move the bundle into `/Applications`
+  on first launch, relaunches the installed copy, and rewrites the Launch at Login item to
+  the new path. The build script now also packages `Setatus.dmg` with an `Applications`
+  symlink.
+
+- MagSafe ring turns green while the charge limit pauses charging. macOS only shows green
+  at 100%, so a hold point left the light amber; the helper now writes the SMC key `ACLC`
+  (`3` green, `0` back to system) alongside the charge key, and the popover notes it. The
+  light returns to system control when charging resumes, the limit is set to 100, or the
+  helper stops.
+- `--icontest` fills the menu bar to verify the icon fallback, and `--charge` checks the
+  LED decision plus state files written before `led` existed. `--ledtest` cycles `ACLC`
+  off and green for a visible check.
+
 ### Changed
 
 - The OpenCode limits card breaks today's tokens into input, output, cache read, and cache
   write, with the cache hit rate and cost beside them.
+
+### Fixed
+
+- About shows the icon from the app bundle instead of the LaunchServices cache, so an icon
+  swap appears without waiting for the system to forget the old one.
+- The popover now sits below the menu bar instead of letting its arrow overlap the bar,
+  and it keeps that position when its content resizes.
 
 ## [0.5.0] - 2026-11-18
 
